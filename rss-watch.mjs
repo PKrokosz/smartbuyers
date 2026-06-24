@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
 import Parser from "rss-parser";
 import { C, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
+import { postToLinkedIn } from "./social.mjs";
+import { generateNewsletter } from "./newsletter.mjs";
 
 const FEEDS_FILE = "feeds.json";
 const mi = process.argv.indexOf("--model"); const MODEL = (mi >= 0 && mi + 1 < process.argv.length) ? process.argv[mi + 1] : "gemma4:e4b";
@@ -10,6 +12,7 @@ const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
 const flagReview = process.argv.includes("--review");
 const flagDigest = process.argv.includes("--digest");
 const queryCount = (() => { const i = process.argv.indexOf("--queries"); return (i >= 0 && i + 1 < process.argv.length) ? parseInt(process.argv[i + 1], 10) || 0 : 0; })();
+const flagNewsletter = process.argv.includes("--newsletter");
 
 const optFormat  = flagDigest ? "digest" : parseFlag(process.argv, "--format", FORMATS, DEF_FORMAT);
 const optPersona = parseFlag(process.argv, "--persona", PERSONAS, DEF_PERSONA);
@@ -66,6 +69,15 @@ function saveArticle(gen, title, link) {
   console.log(`  ${C.grn}→ ${fname}${C.rst}`);
   console.log(`  ${C.cyn}→ ${pageUrl}${C.rst}`);
   return { slug, fname, pageUrl };
+}
+
+// --- competitor logging ---
+function logCompetitor(feed, item, itemTitle, itemLink) {
+  try {
+    const c = existsSync("competitors.json") ? JSON.parse(readFileSync("competitors.json", "utf8")) : [];
+    c.push({ feedName: feed.name, title: itemTitle, link: itemLink, date: item.pubDate || item.isoDate || new Date().toISOString(), loggedAt: new Date().toISOString() });
+    writeFileSync("competitors.json", JSON.stringify(c, null, 2));
+  } catch {}
 }
 
 // --- keyword filter ---
@@ -171,6 +183,12 @@ async function main() {
 
       newCount++; feedGenerated++;
 
+      if (feed.mode === "track") {
+        logCompetitor(feed, item, itemTitle, itemLink);
+        console.log(`  ${C.dim}→ [track] "${itemTitle.slice(0, 60)}"${C.rst}`);
+        continue;
+      }
+
       if (flagDigest) {
         digestItems.push({ title: itemTitle, snippet, link: itemLink });
         console.log(`  ${C.dim}#${ii + 1}: ${itemTitle.slice(0, 70)} [digest]${C.rst}`);
@@ -243,12 +261,14 @@ async function main() {
   if (totalGenerated > 0) {
     step("Git push", C.ylw);
     if (gitPush("articles/ feeds.json generated.json", `Auto: ${totalGenerated} artykuł(i) z RSS`)) {
-      if (lastPageUrl) googleIndexingPing(lastPageUrl);
+      if (lastPageUrl) { googleIndexingPing(lastPageUrl); postToLinkedIn("SmartBuyers — Nowy artykuł", "", lastPageUrl); }
     }
     console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/articles/${C.rst}\n`);
   } else {
     step("Brak nowych wpisów");
   }
+
+  if (flagNewsletter) await generateNewsletter();
 
   console.log(`\n${C.grn}[${ts()}] [DONE] ${((Date.now() - start) / 1000).toFixed(1)}s | ${feeds.length} feedów | ${totalGenerated} artykułów${C.rst}`);
 }

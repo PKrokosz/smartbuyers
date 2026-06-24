@@ -3,6 +3,7 @@ import { createInterface } from "readline";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
 import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
+import { postToLinkedIn } from "./social.mjs";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
@@ -220,6 +221,7 @@ async function main() {
     const files = rssSourceLink ? "articles/ generated.json" : "articles/";
     if (gitPush(files, `Add: ${artTitle.slice(0, 60)}`)) {
       googleIndexingPing(pageUrl);
+      postToLinkedIn(artTitle, body.slice(0, 300), pageUrl);
     }
   }
 

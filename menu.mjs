@@ -54,6 +54,7 @@ function buildArgs(s, extra = {}) {
   if (extra.review) a.push("--review");
   if (extra.push) a.push("--push");
   if (extra.verbose) a.push("--verbose");
+  if (extra.newsletter) a.push("--newsletter");
   return a;
 }
 
@@ -65,10 +66,9 @@ async function showConfigAndRun(mode) {
     showSettingsSummary(s);
     console.log();
     if (mode === "auto") {
-      console.log(`  ${C.dim}Digest:${C.rst} ${s._digest ? "tak" : "nie"} | ${C.dim}Verbose:${C.rst} ${s._verbose ? "tak" : "nie"}`);
+      console.log(`  ${C.dim}Digest:${C.rst} ${s._digest ? "tak" : "nie"} | ${C.dim}Newsletter:${C.rst} ${s._newsletter ? "tak" : "nie"} | ${C.dim}Verbose:${C.rst} ${s._verbose ? "tak" : "nie"}`);
       console.log();
     }
-    const a = await ask(`  [Enter] = uruchom | [s] = ustawienia | [q] = wstecz: `);
     const c = a.trim().toLowerCase();
     if (c === "q") return;
     if (c === "s") {
@@ -76,6 +76,9 @@ async function showConfigAndRun(mode) {
         const d = (await ask(`  Digest mode? [t/n, Enter=${s._digest ? "t" : "n"}]: `)).trim().toLowerCase();
         if (d === "t" || d === "tak") s._digest = true;
         else if (d === "n" || d === "nie") s._digest = false;
+        const nl = (await ask(`  Newsletter po pushu? [t/n, Enter=${s._newsletter ? "t" : "n"}]: `)).trim().toLowerCase();
+        if (nl === "t" || nl === "tak") s._newsletter = true;
+        else if (nl === "n" || nl === "nie") s._newsletter = false;
         const v = (await ask(`  Verbose? [t/n, Enter=${s._verbose ? "t" : "n"}]: `)).trim().toLowerCase();
         if (v === "t" || v === "tak") s._verbose = true;
         else if (v === "n" || v === "nie") s._verbose = false;
@@ -86,7 +89,7 @@ async function showConfigAndRun(mode) {
     }
     break;
   }
-  const extra = { push: true, digest: !!s._digest, verbose: !!s._verbose, review: mode === "review" };
+  const extra = { push: true, digest: !!s._digest, newsletter: !!s._newsletter, verbose: !!s._verbose, review: mode === "review" };
   run("rss-watch.mjs", ...buildArgs(s, extra));
 }
 
@@ -116,7 +119,7 @@ async function settingsMenu(sub) {
     if (p === 8) return;
     if (p === 7) {
       Object.assign(s, { model: "gemma4:e4b", format: DEF_FORMAT, persona: DEF_PERSONA, tone: DEF_TONE, lang: DEF_LANG, queries: 0 });
-      delete s._digest; delete s._verbose;
+      delete s._digest; delete s._newsletter; delete s._verbose;
       saveSettings(s);
       console.log(`  ${C.grn}→ Ustawienia domyślne przywrócone${C.rst}`);
       continue;
@@ -181,9 +184,10 @@ async function main() {
     console.log(`  ${C.grn}3.${C.rst} Auto-watch RSS`);
     console.log(`  ${C.grn}4.${C.rst} Review RSS`);
     console.log(`  ${C.grn}5.${C.rst} Analiza treści (gap analyzer)`);
-    console.log(`  ${C.grn}6.${C.rst} Ustawienia`);
-    console.log(`  ${C.grn}7.${C.rst} Wyjście\n`);
-    const pick = parseInt(await ask("  Wybierz (1-7): "), 10);
+    console.log(`  ${C.grn}6.${C.rst} Newsletter tygodniowy`);
+    console.log(`  ${C.grn}7.${C.rst} Ustawienia`);
+    console.log(`  ${C.grn}8.${C.rst} Wyjście\n`);
+    const pick = parseInt(await ask("  Wybierz (1-8): "), 10);
     console.log();
 
     if (pick === 1) {
@@ -201,6 +205,11 @@ async function main() {
     } else if (pick === 5) {
       run("analyze.mjs");
     } else if (pick === 6) {
+      cleanup();
+      const child = spawn("node", ["newsletter.mjs"], { cwd: process.cwd(), stdio: "inherit" });
+      child.on("exit", () => { process.exit(0); });
+      child.on("error", e => { console.error(`  Błąd: ${e.message}`); process.exit(1); });
+    } else if (pick === 7) {
       await settingsMenu(false);
     } else {
       console.log("  Do widzenia!");

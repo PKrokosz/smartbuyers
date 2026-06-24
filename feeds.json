@@ -2,36 +2,42 @@
   {
     "name": "TechCrunch AI",
     "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "mode": "generate",
     "filter": null,
     "lastGuid": "https://techcrunch.com/?p=3135687"
   },
   {
     "name": "Google News: dropshipping PL",
     "url": "https://news.google.com/rss/search?q=dropshipping+polska&hl=pl&gl=PL&ceid=PL:pl",
+    "mode": "generate",
     "filter": null,
     "lastGuid": "CBMioAFBVV95cUxOM0h2UDJPZ3NaN1hZbENybGU0UVFNdmtEZVdTN2tTQmNXNlRBdzJGOVBsNVZPS1hyZVR5NzZEQy0walNrM3lVbXhWdmZERUcyM3pOakkzRTQtQ1Y5N0hCQkNSX2Uza1lfMnRwbms3X196NlJzM19jaF9YTVcxdjN2ekxsZFBFV1djd3h1a09SZF9WRTFqZFJ1VlF0RTlETnJt"
   },
   {
     "name": "Google News: e-commerce EN",
     "url": "https://news.google.com/rss/search?q=e-commerce+trends+2026&hl=en&gl=US&ceid=US:en",
+    "mode": "generate",
     "filter": null,
     "lastGuid": "CBMi1AFBVV95cUxQOTFFN1hTRkFMWUtySVh4NHd2MHhvVV81SE9Db0ZwT0ZIYy1jWWtfY3piNm5XQndTQlYyM2FScERndWR1aWNUN3g5VXFuc3luT3BfdU42elhNYS11T3FFekhWQk9kckRMMWxxbExrWVpkblpsTkQ2eGY0RjZETW94SGVtVXduYmF2dkJBeGpjOHdlVjhMWXVBU2ljSGM2b05WOGJBRndtYnZqeWV0b0lOaFU2WUREczg3SlBkMEo2d1ZQLU5wVjhVczBhNHNlLVpMWDU2bA"
   },
   {
     "name": "Reddit r/dropshipping",
     "url": "https://www.reddit.com/r/dropshipping/.rss",
+    "mode": "generate",
     "filter": null,
     "lastGuid": "https://www.reddit.com/r/dropshipping/comments/1nzytqk/new_rules_for_dropshipping_expert_verification/"
   },
   {
     "name": "Reddit r/ecommerce",
     "url": "https://www.reddit.com/r/ecommerce/.rss",
+    "mode": "generate",
     "filter": null,
     "lastGuid": null
   },
   {
     "name": "Hacker News (AI + startups)",
     "url": "https://hnrss.org/frontpage",
+    "mode": "generate",
     "filter": [
       "ai",
       "startup",
