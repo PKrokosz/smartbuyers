@@ -19,6 +19,7 @@ const C = {
   rst: "\x1b[0m", red: "\x1b[31m", grn: "\x1b[32m",
   ylw: "\x1b[33m", cyn: "\x1b[36m", dim: "\x1b[2m", ul: "\x1b[4m",
 };
+function esc(s) { return `${s}`.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function ts() { return new Date().toLocaleTimeString("pl-PL"); }
 let stepNo = 0;
 function step(label, color = C.cyn) {
@@ -27,7 +28,12 @@ function step(label, color = C.cyn) {
 }
 let TOTAL;
 
+function cleanup() {
+  try { rl.close(); } catch {}
+}
+
 async function main() {
+  process.on("SIGINT", () => { console.log(`\n${C.ylw}⏹ Przerwano${C.rst}`); cleanup(); process.exit(0); });
   const start = Date.now();
   const useOpenRouter = !!process.env.OPENROUTER_KEY;
   const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
@@ -60,8 +66,7 @@ async function main() {
       model = "qwen2.5:latest";
     }
   }
-  const isOllama = model.includes(":") || !model.includes("/");
-  console.log(`  → ${model}${!useOpenRouter ? ` | isOllama=${isOllama}` : ""}`);
+  console.log(`  → ${model}`);
   if (model.startsWith("qwen3.5")) console.log(`  ℹ️  qwen3.5 z think:false (wyłączony reasoning)`);
 
   // [3] Katalog
@@ -110,19 +115,18 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
         }),
       });
       const dt = ((Date.now() - t0) / 1000).toFixed(1);
-      if (!wup.ok) { console.log(`  ${C.red}→ Błąd ${wup.status}${C.rst}`); process.exit(1); }
+      if (!wup.ok) { console.log(`  ${C.red}→ Błąd ${wup.status}${C.rst}`); rl.close(); process.exit(1); }
       const wj = await wup.json();
       const tokens = wj.usage?.total_tokens || "?";
       const modelLoaded = wj.model || model;
       console.log(`  → ${C.grn}Model gotowy${C.rst} | ${modelLoaded} | ${dt}s | ${tokens} tokenów warmupu`);
     } catch (e) {
       console.log(`  ${C.red}→ Warmup failed: ${e.cause?.message || e.message}${C.rst}`);
-      process.exit(1);
+      rl.close(); process.exit(1);
     }
   }
 
-  // [6/w] Generowanie
-  const genStep = useOpenRouter ? stepNo + 1 : stepNo + 1;
+  // [6] Generowanie
   step("Generowanie artykułu przez AI", C.ylw);
   const genStart = Date.now();
   console.log(`  → Model: ${model}`);
@@ -157,7 +161,7 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
         if (answer.trim().toLowerCase() === "q") {
           ac.abort();
           console.log(`  → Przerwano przez użytkownika`);
-          process.exit(0);
+          rl.close(); process.exit(0);
         }
         console.log(`  → Kontynuuję...\n`);
       } else {
@@ -182,6 +186,7 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
     });
     ac.abort();
     clearInterval(ollamaWatch);
+    ollamaWatch = null;
 
     const genTime = ((Date.now() - genStart) / 1000).toFixed(1);
     console.log(`  → Status: ${res.status} ${res.statusText}`);
@@ -190,17 +195,24 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
     if (!res.ok) {
       const err = await res.text();
       console.log(`  ${C.red}→ Błąd ${res.status}: ${err.slice(0, 300)}${C.rst}`);
-      process.exit(1);
+      rl.close(); process.exit(1);
     }
 
-    raw = (await res.json()).choices[0].message.content;
+    const j = await res.json();
+    const choice = j?.choices?.[0];
+    if (!choice?.message?.content) {
+      console.log(`  ${C.red}→ Ollama nie zwróciła treści${C.rst}`);
+      if (verb) console.log(`  Raw response: ${JSON.stringify(j).slice(0, 500)}`);
+      rl.close(); process.exit(1);
+    }
+    raw = choice.message.content;
     console.log(`  → ${C.grn}Odebrano${C.rst} | ${raw.length} znaków`);
     if (verb) console.log(`  ──[RAW]──\n${raw.slice(0, 500)}...\n  ──────────`);
   } catch (e) {
-    clearInterval(ollamaWatch);
+    if (ollamaWatch) clearInterval(ollamaWatch);
     if (e.name === "AbortError") { console.log(`  → Przerwano przez użytkownika`); }
     else { console.log(`  ${C.red}→ Błąd: ${e.cause?.message || e.message}${C.rst}`); }
-    process.exit(1);
+    rl.close(); process.exit(1);
   }
 
   // [7] Parse JSON
@@ -235,9 +247,9 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${artTitle}</title>
-<meta name="description" content="${desc}">
-<meta name="keywords" content="${kws}">
+<title>${esc(artTitle)}</title>
+<meta name="description" content="${esc(desc)}">
+<meta name="keywords" content="${esc(kws)}">
 <style>
 *,*:before,*:after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:2rem auto;padding:0 1.5rem;line-height:1.7;color:#222}
@@ -257,7 +269,7 @@ a{color:#0366d6}
 </style>
 </head>
 <body>
-<h1>${artTitle}</h1>
+<h1>${esc(artTitle)}</h1>
 <article>${body}</article>
 <div class="footer">Artykuł wygenerowany przez AI · data: ${new Date().toLocaleDateString("pl-PL")}</div>
 </body>
@@ -268,9 +280,9 @@ a{color:#0366d6}
   // [9] Save
   step("Zapis pliku");
   writeFileSync(fname, html, "utf8");
-  const fsize = existsSync(fname) ? `${(html.length / 1024).toFixed(1)} KB` : "?";
+  const fsize = `${(html.length / 1024).toFixed(1)} KB`;
   console.log(`  → ${C.grn}Zapisano${C.rst} ${fname} (${fsize})`);
-  console.log(`  → Sprawdź: ${C.cyn}${fname.replace("articles/", "articles/")}${C.rst}`);
+  console.log(`  → Ścieżka: ${fname}`);
 
   // [10] Done
   step("Podsumowanie", C.grn);

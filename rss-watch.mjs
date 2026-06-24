@@ -5,11 +5,18 @@ import { setTimeout } from "timers/promises";
 
 const FEEDS_FILE = "feeds.json";
 const MODEL = "qwen2.5:1.5b";
+const MAX_ITEMS_PER_FEED = 5;  // rolling window safety – nie generuj więcej niż 5 na feed
 
 const C = {
   rst: "\x1b[0m", red: "\x1b[31m", grn: "\x1b[32m",
   ylw: "\x1b[33m", cyn: "\x1b[36m", dim: "\x1b[2m",
 };
+function esc(s) { return `${s}`.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function safeHref(url) {
+  if (!url) return "";
+  const u = url.trim().toLowerCase();
+  return (u.startsWith("http://") || u.startsWith("https://")) ? url : "";
+}
 function ts() { return new Date().toLocaleTimeString("pl-PL"); }
 const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
 
@@ -100,20 +107,27 @@ async function main() {
     }
 
     console.log(`  Poprzedni GUID: ${feed.lastGuid.slice(0, 60)}...`);
-    const found = parsed.items.findIndex(i => (i.guid || i.link || i.title) === feed.lastGuid);
-    if (found === -1) {
-      console.log(`  ${C.ylw}→ Poprzedni GUID nie znaleziony w feedzie (mógł wypaść) – przetwarzam wszystkie wpisy${C.rst}`);
+    const foundIdx = parsed.items.findIndex(i => (i.guid || i.link || i.title) === feed.lastGuid);
+    if (foundIdx === -1) {
+      console.log(`  ${C.ylw}→ Poprzedni GUID nie znaleziony w feedzie – przetwarzam maks. ${MAX_ITEMS_PER_FEED} najnowszych${C.rst}`);
     } else {
-      console.log(`  → Poprzedni GUID znaleziony na pozycji ${found + 1}/${parsed.items.length}`);
-      console.log(`  → Nowe wpisy: ${found} (przed nim)`);
+      console.log(`  → Poprzedni GUID znaleziony na pozycji ${foundIdx + 1}/${parsed.items.length}`);
+      console.log(`  → Nowe wpisy: ${foundIdx} (przed nim)`);
     }
 
     // [4] Przetwarzaj nowe wpisy
+    let feedGenerated = 0;
     for (const [ii, item] of parsed.items.entries()) {
       const guid = item.guid || item.link || item.title;
       if (!guid) continue;
       if (guid === feed.lastGuid) {
         console.log(`  ${C.dim}→ Osiągnięto poprzedni GUID, koniec nowych wpisów${C.rst}`);
+        break;
+      }
+
+      // rolling window safety
+      if (foundIdx === -1 && feedGenerated >= MAX_ITEMS_PER_FEED) {
+        console.log(`  ${C.dim}→ Limit ${MAX_ITEMS_PER_FEED} wpisów na feed osiągnięty (stary GUID wypadł)${C.rst}`);
         break;
       }
 
@@ -129,6 +143,7 @@ async function main() {
       console.log(`  Treść:  ${snippet.length} znaków`);
       anyNew = true;
       totalGenerated++;
+      feedGenerated++;
 
       // [4b] Budowa prompta
       console.log(`\n  ──[BUDOWA PROMPTA]──`);
@@ -205,7 +220,13 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 500 słów. P
           continue;
         }
         const j = await res.json();
-        raw = j.choices[0].message.content;
+        const choice = j?.choices?.[0];
+        if (!choice?.message?.content) {
+          console.log(`  ${C.red}→ Ollama nie zwróciła treści${C.rst}`);
+          if (verb) console.log(`  Raw: ${JSON.stringify(j).slice(0, 500)}`);
+          continue;
+        }
+        raw = choice.message.content;
         const usage = j.usage || {};
         console.log(`  Wynik:   ${raw.length} znaków`);
         console.log(`  Usage:   ${usage.prompt_tokens || "?"} in → ${usage.completion_tokens || "?"} out (${usage.total_tokens || "?"} total)`);
@@ -236,7 +257,8 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 500 słów. P
       const kws = data?.keywords || "";
       let body = (data?.body || raw).replace(/^```html?\n?|```$/gmi, "").trim();
       if (item.link && !body.includes(item.link)) {
-        body += `\n\n<h2>Źródło</h2>\n<p><a href="${item.link}" rel="nofollow">${item.link}</a></p>`;
+        const href = safeHref(item.link);
+        if (href) body += `\n\n<h2>Źródło</h2>\n<p><a href="${href}" rel="nofollow">${esc(item.link)}</a></p>`;
       }
       if (!existsSync("articles")) mkdirSync("articles");
       const slug = artTitle.toLowerCase()
@@ -251,9 +273,9 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 500 słów. P
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${artTitle}</title>
-<meta name="description" content="${desc}">
-<meta name="keywords" content="${kws}">
+<title>${esc(artTitle)}</title>
+<meta name="description" content="${esc(desc)}">
+<meta name="keywords" content="${esc(kws)}">
 <style>
 *,*:before,*:after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:2rem auto;padding:0 1.5rem;line-height:1.7;color:#222}
@@ -273,9 +295,9 @@ a{color:#0366d6}
 </style>
 </head>
 <body>
-<h1>${artTitle}</h1>
+<h1>${esc(artTitle)}</h1>
 <article>${body}</article>
-<div class="footer">Artykuł wygenerowany przez AI · źródło: <a href="${item.link || ""}">${item.link || "oryginalny news"}</a> · data: ${new Date().toLocaleDateString("pl-PL")}</div>
+<div class="footer">Artykuł wygenerowany przez AI · źródło: <a href="${safeHref(item.link)}" rel="nofollow">${esc(item.link || "oryginalny news")}</a> · data: ${new Date().toLocaleDateString("pl-PL")}</div>
 </body>
 </html>`;
 
