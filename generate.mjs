@@ -1,5 +1,6 @@
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { createInterface } from "readline";
+import { setTimeout } from "timers/promises";
 
 const MODELS = [
   "qwen2.5:latest",
@@ -62,22 +63,53 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
 
   console.log(`[${ts()}] [INFO]  Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"} | Model: ${model}`);
   console.log(`[${ts()}] [INFO]  Wysyłam zapytanie...`);
-  const dots = setInterval(() => process.stdout.write("."), 5000);
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: PROMPT }],
-      temperature: 0.7,
-      max_tokens: 8192,
-      ...(useOpenRouter ? {} : { think: false }),
-    }),
-  });
+  const ac = new AbortController();
+  let prompted = false;
 
-  clearInterval(dots);
-  process.stdout.write("\n");
+  const statusLoop = (async () => {
+    while (!ac.signal.aborted) {
+      await setTimeout(30000);
+      const elapsed = ((Date.now() - start) / 1000).toFixed(0);
+      if (!prompted && elapsed >= 120) {
+        prompted = true;
+        const answer = await ask(`\n[${ts()}] [WAIT]  Generowanie trwa już ${elapsed}s.\n        Naciśnij Enter aby czekać, lub wpisz "q" i Enter aby przerwać: `);
+        if (answer.trim().toLowerCase() === "q") {
+          ac.abort();
+          console.log(`[${ts()}] [INFO]  Przerwano przez użytkownika`);
+          process.exit(0);
+        }
+        console.log(`[${ts()}] [INFO]  Kontynuuję...\n`);
+      } else {
+        console.log(`[${ts()}] [INFO]  Generowanie trwa... (${elapsed}s)`);
+      }
+    }
+  })();
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      signal: ac.signal,
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: PROMPT }],
+        temperature: 0.7,
+        max_tokens: 8192,
+        ...(useOpenRouter ? {} : { think: false }),
+      }),
+    });
+  } catch (e) {
+    if (e.name === "AbortError") {
+      console.log(`[${ts()}] [INFO]  Przerwano przez użytkownika`);
+    } else {
+      console.log(`[${ts()}] [ERR]  Błąd połączenia: ${e.cause?.message || e.message}`);
+    }
+    process.exit(1);
+  } finally {
+    ac.abort();
+  }
 
   if (!res.ok) {
     const err = await res.text();
