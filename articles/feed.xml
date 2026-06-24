@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>SmartBuyers — AI Content Engine</title>
+    <link>https://pkrokosz.github.io/smartbuyers/articles/</link>
+    <description>Automatycznie generowane artykuły SEO z RSS feedów. B2B dropshipping, e-commerce, AI.</description>
+    <language>pl</language>
+    <lastBuildDate>Wed, 24 Jun 2026 14:07:16 GMT</lastBuildDate>
+    <atom:link href="https://pkrokosz.github.io/smartbuyers/articles/feed.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>Techcrunch Founder Summit 2026 Pass Deal Expires Soon</title>
+      <link>https://pkrokosz.github.io/smartbuyers/articles/techcrunch-founder-summit-2026-pass-deal-expires-soon.html</link>
+      <guid isPermaLink="true">https://pkrokosz.github.io/smartbuyers/articles/techcrunch-founder-summit-2026-pass-deal-expires-soon.html</guid>
+      <pubDate>Wed, 24 Jun 2026 14:07:09 GMT</pubDate>
+      <source url="https://techcrunch.com/2026/06/24/3-days-left-to-save-up-to-190-on-techcrunch-founder-summit-2026/">https://techcrunch.com/2026/06/24/3-days-left-to-save-up-to-</source>
+    </item>
+    <item>
+      <title>Google Deepmind I A24 Stworz Narz Dzia Ai W Filmowym Stylu</title>
+      <link>https://pkrokosz.github.io/smartbuyers/articles/google-deepmind-i-a24-stworz-narz-dzia-ai-w-filmowym-stylu.html</link>
+      <guid isPermaLink="true">https://pkrokosz.github.io/smartbuyers/articles/google-deepmind-i-a24-stworz-narz-dzia-ai-w-filmowym-stylu.html</guid>
+      <pubDate>Wed, 24 Jun 2026 13:18:17 GMT</pubDate>
+      <source url="https://techcrunch.com/2026/06/22/google-deepmind-bets-75m-on-ais-future-in-hollywood-with-a24-deal/">https://techcrunch.com/2026/06/22/google-deepmind-bets-75m-o</source>
+    </item>
+    <item>
+      <title>Amazon Testuje Now Wersj Alexa Z Pod Hindi W Indiach</title>
+      <link>https://pkrokosz.github.io/smartbuyers/articles/amazon-testuje-now-wersj-alexa-z-pod-hindi-w-indiach.html</link>
+      <guid isPermaLink="true">https://pkrokosz.github.io/smartbuyers/articles/amazon-testuje-now-wersj-alexa-z-pod-hindi-w-indiach.html</guid>
+      <pubDate>Wed, 24 Jun 2026 13:01:32 GMT</pubDate>
+      <source url="https://techcrunch.com/2026/06/22/amazon-is-testing-alexa-in-india-with-hindi-support/">https://techcrunch.com/2026/06/22/amazon-is-testing-alexa-in</source>
+    </item>
+    <item>
+      <title>Anthropic S Claude Tag Szybki I Zdecydowany Przys Ogiciel Dl</title>
+      <link>https://pkrokosz.github.io/smartbuyers/articles/anthropic-s-claude-tag-szybki-i-zdecydowany-przys-ogiciel-dl.html</link>
+      <guid isPermaLink="true">https://pkrokosz.github.io/smartbuyers/articles/anthropic-s-claude-tag-szybki-i-zdecydowany-przys-ogiciel-dl.html</guid>
+      <pubDate>Wed, 24 Jun 2026 12:47:33 GMT</pubDate>
+      <source url="https://techcrunch.com/2026/06/23/anthropics-claude-tag-is-learning-your-company-one-slack-message-at-a-time/">https://techcrunch.com/2026/06/23/anthropics-claude-tag-is-l</source>
+    </item>
+  </channel>
+</rss>

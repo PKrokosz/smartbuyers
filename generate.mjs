@@ -3,7 +3,7 @@ import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
-import { C, esc, ts, stepReset, step, loadGen, isGen, markGen, ollamaModels, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap } from "./lib/shared.mjs";
+import { C, esc, ts, stepReset, step, loadGen, isGen, markGen, ollamaModels, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed, pingGoogle } from "./lib/shared.mjs";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
@@ -213,14 +213,17 @@ async function main() {
   step("Index + Sitemap", C.ylw);
   const idxCount = generateIndex();
   generateSitemap();
-  console.log(`  → articles/index.html (${idxCount} artykułów)`);
-  console.log(`  → articles/sitemap.xml`);
+  generateFeed();
+  console.log(`  → articles/index.html (${idxCount} artykułów) | feed.xml | sitemap.xml`);
 
   // [10] Push (optional)
   if (flagPush) {
     step("Git push", C.ylw);
     const files = rssSourceLink ? "articles/ generated.json" : "articles/";
     gitPush(files, `Add: ${artTitle.slice(0, 60)}`);
+    // Google Indexing ping (if key set)
+    const pageUrl = `https://pkrokosz.github.io/smartbuyers/articles/${slug}.html`;
+    try { await pingGoogle(pageUrl); } catch {}
   }
 
   // Done

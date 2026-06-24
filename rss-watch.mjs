@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
 import { execSync } from "child_process";
 import Parser from "rss-parser";
-import { C, esc, safeHref, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, FORMATS, PERSONAS, TONES, LANGS, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, buildPrompt, validate, streamResponse, slugify, buildHtml, gitPush, generateIndex, generateSitemap } from "./lib/shared.mjs";
+import { C, esc, safeHref, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, FORMATS, PERSONAS, TONES, LANGS, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, buildPrompt, validate, streamResponse, slugify, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed, pingGoogle } from "./lib/shared.mjs";
 
 const FEEDS_FILE = "feeds.json";
 const MODEL = "qwen2.5:1.5b";
@@ -205,7 +205,7 @@ async function main() {
   }
 
   writeFileSync(FEEDS_FILE, JSON.stringify(feeds, null, 2));
-  generateIndex(); generateSitemap();
+  generateIndex(); generateSitemap(); generateFeed();
 
   if (totalGenerated > 0) {
     step("Git push", C.ylw);
