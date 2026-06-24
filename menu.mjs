@@ -3,9 +3,8 @@ import { spawn } from "child_process";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { C, FORMATS, PERSONAS, TONES, LANGS, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, ollamaModels } from "./lib/shared.mjs";
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+let rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
-function cleanup() { try { rl.close(); } catch {} }
 
 const SETTINGS_FILE = "settings.json";
 
@@ -20,13 +19,22 @@ function perLabel(s) { return PERSONAS[s]?.label || s; }
 function toneLabel(s) { return TONES[s]?.label || s; }
 function langLabel(s) { return LANGS[s]?.label || s; }
 
-function run(cmd, ...args) {
-  cleanup();
+async function run(cmd, ...args) {
+  rl.close();
   const full = [cmd, ...args];
   console.log(`\n  → node ${full.join(" ")}\n`);
   const child = spawn("node", full, { cwd: process.cwd(), stdio: "inherit" });
-  child.on("exit", code => process.exit(code || 0));
-  child.on("error", e => { console.error(`  Błąd: ${e.message}`); process.exit(1); });
+  return new Promise(resolve => {
+    child.on("exit", () => {
+      rl = createInterface({ input: process.stdin, output: process.stdout });
+      resolve();
+    });
+    child.on("error", e => {
+      console.error(`  Błąd: ${e.message}`);
+      rl = createInterface({ input: process.stdin, output: process.stdout });
+      resolve();
+    });
+  });
 }
 
 function showHeader(title) {
@@ -69,6 +77,7 @@ async function showConfigAndRun(mode) {
       console.log(`  ${C.dim}Digest:${C.rst} ${s._digest ? "tak" : "nie"} | ${C.dim}Newsletter:${C.rst} ${s._newsletter ? "tak" : "nie"} | ${C.dim}Verbose:${C.rst} ${s._verbose ? "tak" : "nie"}`);
       console.log();
     }
+    const a = await ask(`  [Enter] = uruchom | [s] = ustawienia | [q] = wstecz: `);
     const c = a.trim().toLowerCase();
     if (c === "q") return;
     if (c === "s") {
@@ -90,7 +99,7 @@ async function showConfigAndRun(mode) {
     break;
   }
   const extra = { push: true, digest: !!s._digest, newsletter: !!s._newsletter, verbose: !!s._verbose, review: mode === "review" };
-  run("rss-watch.mjs", ...buildArgs(s, extra));
+  await run("rss-watch.mjs", ...buildArgs(s, extra));
 }
 
 async function pickModel(s) {
@@ -167,7 +176,7 @@ async function settingsMenu(sub) {
 }
 
 async function main() {
-  process.on("SIGINT", () => { console.log(`\n${C.ylw}⏹ Przerwano${C.rst}`); cleanup(); process.exit(0); });
+  process.on("SIGINT", () => { console.log(`\n${C.ylw}⏹ Przerwano${C.rst}`); rl.close(); process.exit(0); });
   if (!existsSync("settings.json")) saveSettings(loadSettings());
 
   while (true) {
@@ -193,27 +202,24 @@ async function main() {
     if (pick === 1) {
       const topic = (await ask("  Temat artykułu [Enter=dropshipping B2B]: ")).trim() || "Czym jest dropshipping B2B";
       const dopush = (await ask("  Push na git po zapisie? [t/n, Enter=t]: ")).trim().toLowerCase();
-      run("generate.mjs", topic, ...buildArgs(s, { push: dopush !== "n" }));
+      await run("generate.mjs", topic, ...buildArgs(s, { push: dopush !== "n" }));
     } else if (pick === 2) {
       const url = (await ask("  URL feedu RSS [Enter=TechCrunch AI]: ")).trim() || "https://techcrunch.com/category/artificial-intelligence/feed/";
       const dopush = (await ask("  Push na git po zapisie? [t/n, Enter=t]: ")).trim().toLowerCase();
-      run("generate.mjs", "--rss", url, ...buildArgs(s, { push: dopush !== "n" }));
+      await run("generate.mjs", "--rss", url, ...buildArgs(s, { push: dopush !== "n" }));
     } else if (pick === 3) {
       await showConfigAndRun("auto");
     } else if (pick === 4) {
       await showConfigAndRun("review");
     } else if (pick === 5) {
-      run("analyze.mjs");
+      await run("analyze.mjs");
     } else if (pick === 6) {
-      cleanup();
-      const child = spawn("node", ["newsletter.mjs"], { cwd: process.cwd(), stdio: "inherit" });
-      child.on("exit", () => { process.exit(0); });
-      child.on("error", e => { console.error(`  Błąd: ${e.message}`); process.exit(1); });
+      await run("newsletter.mjs");
     } else if (pick === 7) {
       await settingsMenu(false);
     } else {
       console.log("  Do widzenia!");
-      cleanup();
+      rl.close();
       process.exit(0);
     }
   }
