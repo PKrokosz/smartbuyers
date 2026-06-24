@@ -1,10 +1,18 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { createInterface } from "readline";
 import { execSync } from "child_process";
 import Parser from "rss-parser";
 
 const FEEDS_FILE = "feeds.json";
+const GENERATED = "generated.json";
 const MODEL = "qwen2.5:1.5b";
 const MAX_ITEMS_PER_FEED = 5;
+
+// --- generated.json ---
+function loadGen() { try { return JSON.parse(readFileSync(GENERATED, "utf8")); } catch { return {}; } }
+function saveGen(g) { writeFileSync(GENERATED, JSON.stringify(g, null, 2)); }
+function isGen(url) { return !!(loadGen()[url]); }
+function markGen(url, slug) { const g = loadGen(); g[url] = { slug, date: new Date().toISOString() }; saveGen(g); }
 
 const C = {
   rst: "\x1b[0m", red: "\x1b[31m", grn: "\x1b[32m",
@@ -18,6 +26,7 @@ function safeHref(url) {
 }
 function ts() { return new Date().toLocaleTimeString("pl-PL"); }
 const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
+const flagReview = process.argv.includes("--review");
 
 let stepNo = 0;
 function step(label, color = C.cyn) {
@@ -233,6 +242,14 @@ async function main() {
         break;
       }
 
+      // check generated.json (skip already-done items, even from manual runs)
+      const itemLink = item.link || item.guid;
+      const genDb = loadGen();
+      if (itemLink && genDb[itemLink]) {
+        console.log(`  ${C.dim}→ Już wygenerowany (${genDb[itemLink].slug}) – pomijam${C.rst}`);
+        continue;
+      }
+
       anyNew = true;
       totalGenerated++;
       feedGenerated++;
@@ -242,6 +259,21 @@ async function main() {
 
       console.log(`\n  ── NOWY #${ii + 1}: ${itemTitle.slice(0, 80)} ──`);
       console.log(`  Treść: ${snippet.length} znaków | Link: ${item.link || "brak"}`);
+
+      // --review: interactive prompt
+      if (flagReview) {
+        const ans = await new Promise(r => {
+          const rl2 = createInterface({ input: process.stdin, output: process.stdout });
+          rl2.question(`  ${C.ylw}[g]eneruj / [p]omiń / [q]wyjdź?${C.rst} `, a => { rl2.close(); r(a.trim().toLowerCase()); });
+        });
+        if (ans === "q") { console.log(`  → Wyjście`); break; }
+        if (ans === "p" || ans === "n" || ans === "") {
+          console.log(`  → Pominięto`);
+          totalGenerated--; feedGenerated--;
+          continue;
+        }
+        console.log(`  → Generuję...`);
+      }
 
       // Warmup (first item only — model stays loaded)
       if (feedGenerated === 1) {
@@ -330,6 +362,7 @@ a{color:#0366d6}
 </html>`;
 
       writeFileSync(fname, html, "utf8");
+      if (itemLink) markGen(itemLink, slug);
       console.log(`  ${C.grn}→ ZAPISANO: ${fname}${C.rst}`);
       console.log(`  ${C.cyn}→ https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}`);
     }
@@ -341,10 +374,10 @@ a{color:#0366d6}
   writeFileSync(FEEDS_FILE, JSON.stringify(feeds, null, 2));
   log("INFO", `feeds.json zapisany`);
 
-  if (anyNew) {
+  if (totalGenerated > 0) {
     step("Git: commit i push", C.ylw);
     try {
-      const a = execSync(`git add articles/ feeds.json`, { cwd: ".", encoding: "utf8" });
+      const a = execSync(`git add articles/ feeds.json generated.json`, { cwd: ".", encoding: "utf8" });
       if (a.trim()) console.log(`  add: ${a.trim()}`);
       const c = execSync(`git commit -m "Auto: ${totalGenerated} artykuł(i) z RSS"`, { cwd: ".", encoding: "utf8" });
       console.log(`  commit: ${c.trim()}`);
