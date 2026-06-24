@@ -58,7 +58,7 @@ async function generateDigest(items) {
 
 // --- save article ---
 function saveArticle(gen, title, link) {
-  const extra = link ? { sourceLink: link, sourceLabel: title } : {};
+  const extra = link ? { sourceLink: link, sourceLabel: title, format: optFormat } : { format: optFormat };
   const { html, fname, body, slug, artTitle } = buildHtml(gen.data, gen.raw, title, MODEL, extra);
   console.log(`  → ${slug} | ${body.length} zn`);
   if (!existsSync("articles")) mkdirSync("articles");

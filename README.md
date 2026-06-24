@@ -150,8 +150,9 @@ Pole `filter` — lista słów kluczowych. Jeśli ustawione, tylko newsy zawiera
 
 Zobacz [ROADMAP.md](ROADMAP.md) — 5 faz do jakości narzędzi klasy TRYSORO:
 
-1. ✅ Fundament (shared module, Schema.org, sitemap, index)
-2. ✅ Content diversity (8 formatów, 5 person, 4 tony, 2 języki)
-3. ✅ RSS intelligence (6 feedów, filtrowanie, digest mode)
-4. 📋 Content intelligence (internal linking, FAQ schema, gap analyzer)
+1. ✅ Fundament
+2. ✅ Content diversity
+3. ✅ RSS intelligence
+4. ✅ Content intelligence (internal linking, FAQ schema, gap analyzer, readability)
+5. 📋 Dystrybucja
 5. 📋 Dystrybucja (RSS feed bloga, social auto-post, newsletter)

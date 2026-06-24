@@ -192,7 +192,7 @@ async function main() {
 
   // [7] Build HTML
   step("Generowanie dokumentu HTML");
-  const extra = rssSourceLink ? { sourceLink: rssSourceLink, sourceLabel: rssSourceLabel } : {};
+  const extra = rssSourceLink ? { sourceLink: rssSourceLink, sourceLabel: rssSourceLabel, format: optFormat } : { format: optFormat };
   const { html, fname, body, slug, artTitle } = buildHtml(result.data, result.raw, topic, model, extra);
   console.log(`  → ${artTitle.slice(0, 60)} | ${slug}`);
   console.log(`  → Body: ${body.length} zn | HTML: ${html.length} zn (~${Math.ceil(html.length/1024)} KB)`);
