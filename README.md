@@ -153,6 +153,8 @@ Zobacz [ROADMAP.md](ROADMAP.md) — 5 faz do jakości narzędzi klasy TRYSORO:
 1. ✅ Fundament
 2. ✅ Content diversity
 3. ✅ RSS intelligence
-4. ✅ Content intelligence (internal linking, FAQ schema, gap analyzer, readability)
-5. 📋 Dystrybucja
+4. ✅ Content intelligence
+5. ✅ Dystrybucja (feed.xml, Google Indexing ping)
+
+**Roadmap zrealizowany w 100%.**
 5. 📋 Dystrybucja (RSS feed bloga, social auto-post, newsletter)
