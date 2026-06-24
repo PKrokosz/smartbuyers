@@ -1,17 +1,16 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { execSync } from "child_process";
 import Parser from "rss-parser";
-import { setTimeout } from "timers/promises";
 
 const FEEDS_FILE = "feeds.json";
 const MODEL = "qwen2.5:1.5b";
-const MAX_ITEMS_PER_FEED = 5;  // rolling window safety – nie generuj więcej niż 5 na feed
+const MAX_ITEMS_PER_FEED = 5;
 
 const C = {
   rst: "\x1b[0m", red: "\x1b[31m", grn: "\x1b[32m",
   ylw: "\x1b[33m", cyn: "\x1b[36m", dim: "\x1b[2m",
 };
-function esc(s) { return `${s}`.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function esc(s) { return `${s}`.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function safeHref(url) {
   if (!url) return "";
   const u = url.trim().toLowerCase();
@@ -33,240 +32,269 @@ function ollamaPs() {
   try {
     const ps = execSync("ollama ps", { encoding: "utf8", timeout: 3000 }).trim();
     const lines = ps.split("\n").filter(l => l.trim());
-    if (lines.length > 1) {
-      return lines.slice(1).map(l => l.trim()).join(" | ");
-    }
+    if (lines.length > 1) return lines.slice(1).map(l => l.trim()).join(" | ");
   } catch {}
   return null;
 }
 
+// --- prompts ---
+const SYSTEM = `Jesteś polskim dziennikarzem technologicznym i ekspertem SEO. Przetwarzasz angielskie newsy na polskie artykuły.
+
+Każda odpowiedź to TYLKO jeden czysty obiekt JSON — bez znaczników \`\`\`, bez komentarzy, bez dodatkowego tekstu przed ani po.
+
+Przykład poprawnej odpowiedzi:
+{"title":"Sztuczna inteligencja zmienia e-commerce – nowy raport","desc":"Najnowszy raport pokazuje jak AI rewolucjonizuje handel elektroniczny. Automatyzacja, personalizacja i nowe narzędzia.","keywords":"AI, e-commerce, sztuczna inteligencja, automatyzacja","body":"<h2>Rewolucja AI w e-commerce</h2><p>Sztuczna inteligencja zmienia sposób w jaki... <strong>kluczowe trendy</strong> obejmują...</p><h2>Najważniejsze wnioski</h2><ul><li>Personalizacja ofert</li><li>Automatyzacja obsługi klienta</li></ul><h2>Podsumowanie</h2><p>Firmy które nie wdrożą AI...</p>"}
+
+body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 300 słów. Po polsku.`;
+
+function userPrompt(title, snippet) {
+  return `Napisz artykuł SEO po polsku na podstawie tego angielskiego newsa.
+
+ORYGINALNY NEWS (EN):
+Tytuł: ${title}
+Treść: ${snippet}
+
+Zwracasz WYŁĄCZNIE czysty JSON z polami: title, desc, keywords, body.`;
+}
+
+// --- validation ---
+function validate(data) {
+  const issues = [];
+  const body = data?.body || "";
+  const words = body.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+  const hasH2 = /<h2[^>]*>/i.test(body);
+  const desc = (data?.desc || "").trim();
+
+  if (!data?.title) issues.push("brak tytułu");
+  if (!data?.body) issues.push("brak treści");
+  if (words < 150) issues.push(`mało słów (${words})`);
+  if (!hasH2) issues.push("brak <h2>");
+  if (desc.length < 40) issues.push("meta desc za krótkie");
+
+  return { ok: issues.length === 0, issues, words, hasH2 };
+}
+
+// --- streaming reader ---
+async function streamResponse(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let full = "";
+  let tick = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() || "";
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const json = t.slice(5).trim();
+      if (json === "[DONE]") continue;
+      try {
+        const p = JSON.parse(json);
+        const delta = p.choices?.[0]?.delta?.content;
+        if (delta) { full += delta; tick++; }
+      } catch {}
+    }
+    if (tick > 0 && tick % 50 === 0) process.stdout.write(`\r    → ${full.length} znaków...`);
+  }
+  process.stdout.write(`\r    → ${full.length} znaków (gotowe)    \n`);
+  return full;
+}
+
+// --- generation with retry ---
+async function generate(itemTitle, snippet, attempt = 0) {
+  const body = {
+    model: MODEL,
+    messages: [
+      { role: "system", content: SYSTEM },
+      { role: "user", content: userPrompt(itemTitle, snippet) },
+    ],
+    temperature: 0.3,
+    max_tokens: 8192,
+    stream: true,
+    response_format: { type: "json_object" },
+    think: false,
+  };
+
+  if (attempt > 0) console.log(`    ${C.ylw}RETRY ${attempt + 1}/2${C.rst}`);
+
+  const t0 = Date.now();
+  const res = await fetch("http://localhost:11434/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const raw = await streamResponse(res);
+  const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`    → ${dt}s | ${res.status} | ${raw.length} znaków`);
+
+  let data;
+  try { data = JSON.parse(raw); } catch {
+    try {
+      const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      data = JSON.parse(cleaned);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!data) {
+    console.log(`    ${C.ylw}→ JSON niepoprawny${C.rst}`);
+    return { data: null, raw };
+  }
+
+  console.log(`    → title: "${(data.title || "").slice(0, 50)}"`);
+  console.log(`    → body:  ${(data.body || "").length} znaków`);
+
+  const v = validate(data);
+  console.log(`    → Słowa: ${v.words} | H2: ${v.hasH2 ? "✅" : "❌"}`);
+
+  if (!v.ok && attempt < 1) {
+    console.log(`    ${C.ylw}→ Walidacja: ${v.issues.join(", ")} — ponawiam${C.rst}`);
+    return generate(itemTitle, snippet, attempt + 1);
+  }
+
+  return { data, raw, valid: v.ok, issues: v.issues };
+}
+
+// --- main ---
 async function main() {
   const start = Date.now();
   console.log("╔══════════════════════════════════════════╗");
-  console.log("║     RSS → AI → Blog                      ║");
-  console.log("║     Telemetria: KROK po KROKU            ║");
+  console.log("║     RSS → AI → Blog v2                   ║");
   console.log("╚══════════════════════════════════════════╝");
-  console.log(`  Tryb:     ${verb ? "verbose (pełne dane)" : "normalny"}`);
-  console.log(`  Model:    ${MODEL}`);
-  console.log(`  Ollama:   ${ollamaPs() || "brak aktywnych modeli"}\n`);
+  console.log(`  Tryb:   ${verb ? "verbose" : "normalny"}`);
+  console.log(`  Model:  ${MODEL} | Streaming + JSON mode | Temp: 0.3`);
+  console.log(`  Ollama: ${ollamaPs() || "brak aktywnych modeli"}\n`);
 
-  // [1] Wczytaj feedy
   step("Wczytywanie konfiguracji feedów");
-  if (!existsSync(FEEDS_FILE)) {
-    log("ERR", `Brak pliku ${FEEDS_FILE}`, C.red);
-    process.exit(1);
-  }
-  const feedsRaw = readFileSync(FEEDS_FILE, "utf8");
-  const feeds = JSON.parse(feedsRaw);
-  log("INFO", `${feeds.length} feed(ów) wczytanych z ${FEEDS_FILE}`);
-  feeds.forEach((f, i) => console.log(`  ${i + 1}. ${f.name || f.url} | lastGuid: ${f.lastGuid ? f.lastGuid.slice(0, 40) + "..." : "BRAK (pierwszy raz)"}`));
+  if (!existsSync(FEEDS_FILE)) { log("ERR", `Brak ${FEEDS_FILE}`, C.red); process.exit(1); }
+  const feeds = JSON.parse(readFileSync(FEEDS_FILE, "utf8"));
+  log("INFO", `${feeds.length} feed(ów)`);
+  feeds.forEach((f, i) => console.log(`  ${i + 1}. ${f.name || f.url} | lastGuid: ${f.lastGuid ? f.lastGuid.slice(0, 40) + "..." : "BRAK"}`));
 
   const parser = new Parser();
   let anyNew = false;
   let totalGenerated = 0;
 
   for (const [fi, feed] of feeds.entries()) {
-    // [2] Pobierz RSS
-    step(`[Feed ${fi + 1}/${feeds.length}] Pobieranie RSS: ${feed.name || feed.url}`, C.ylw);
+    step(`[Feed ${fi + 1}/${feeds.length}] Pobieranie: ${feed.name || feed.url}`, C.ylw);
     console.log(`  URL: ${feed.url}`);
 
     let parsed;
     const t0 = Date.now();
     try {
       parsed = await parser.parseURL(feed.url);
-      const dt = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`  Status: OK (${dt}s)`);
-      console.log(`  Tytuł feeda: ${parsed.title || "brak"}`);
-      console.log(`  Liczba wpisów: ${parsed.items.length}`);
+      console.log(`  OK (${((Date.now() - t0) / 1000).toFixed(1)}s) | ${parsed.items.length} wpisów`);
     } catch (e) {
-      console.log(`  ${C.red}Status: BŁĄD${C.rst}`);
       log("ERR", `Feed failed: ${e.message}`, C.red);
       continue;
     }
 
-    if (parsed.items.length === 0) {
-      console.log("  → Brak wpisów, pomijam");
-      continue;
-    }
+    if (parsed.items.length === 0) { console.log("  → Brak wpisów"); continue; }
 
-    // [3] Sprawdź lastGuid
     step(`[Feed ${fi + 1}] Analiza lastGuid`);
     const newest = parsed.items[0];
     const newestGuid = newest.guid || newest.link || newest.title;
-    if (!newestGuid) {
-      log("WARN", "Brak GUID w najnowszym wpisie", C.ylw);
-      continue;
-    }
-    console.log(`  Najnowszy GUID: ${newestGuid.slice(0, 60)}...`);
-    console.log(`  Najnowszy tytuł: ${(newest.title || "").slice(0, 60)}`);
+    if (!newestGuid) { log("WARN", "Brak GUID"); continue; }
+
+    console.log(`  Najnowszy: ${(newest.title || "").slice(0, 60)}`);
 
     if (!feed.lastGuid) {
       feed.lastGuid = newestGuid;
-      console.log(`  ${C.dim}→ Pierwsze uruchomienie – zapamiętuję GUID i kończę${C.rst}`);
+      console.log(`  ${C.dim}→ Pierwsze uruchomienie – zapamiętuję GUID${C.rst}`);
       continue;
     }
 
-    console.log(`  Poprzedni GUID: ${feed.lastGuid.slice(0, 60)}...`);
     const foundIdx = parsed.items.findIndex(i => (i.guid || i.link || i.title) === feed.lastGuid);
     if (foundIdx === -1) {
-      console.log(`  ${C.ylw}→ Poprzedni GUID nie znaleziony w feedzie – przetwarzam maks. ${MAX_ITEMS_PER_FEED} najnowszych${C.rst}`);
+      console.log(`  ${C.ylw}→ GUID nie znaleziony – max ${MAX_ITEMS_PER_FEED} najnowszych${C.rst}`);
     } else {
-      console.log(`  → Poprzedni GUID znaleziony na pozycji ${foundIdx + 1}/${parsed.items.length}`);
-      console.log(`  → Nowe wpisy: ${foundIdx} (przed nim)`);
+      console.log(`  → GUID na pozycji ${foundIdx + 1}/${parsed.items.length} | nowych: ${foundIdx}`);
     }
 
-    // [4] Przetwarzaj nowe wpisy
     let feedGenerated = 0;
     for (const [ii, item] of parsed.items.entries()) {
       const guid = item.guid || item.link || item.title;
       if (!guid) continue;
-      if (guid === feed.lastGuid) {
-        console.log(`  ${C.dim}→ Osiągnięto poprzedni GUID, koniec nowych wpisów${C.rst}`);
-        break;
-      }
-
-      // rolling window safety
+      if (guid === feed.lastGuid) { console.log(`  ${C.dim}→ Koniec nowych wpisów${C.rst}`); break; }
       if (foundIdx === -1 && feedGenerated >= MAX_ITEMS_PER_FEED) {
-        console.log(`  ${C.dim}→ Limit ${MAX_ITEMS_PER_FEED} wpisów na feed osiągnięty (stary GUID wypadł)${C.rst}`);
+        console.log(`  ${C.dim}→ Limit ${MAX_ITEMS_PER_FEED} osiągnięty${C.rst}`);
         break;
       }
 
-      // [4a] Info o wpisie
-      const itemTitle = item.title || "Bez tytułu";
-      const pubDate = item.pubDate || item.isoDate || "?";
-      const snippet = (item.contentSnippet || item.content || "").slice(0, 4000);
-      console.log(`\n  ── NOWY WPIS #${ii + 1} ──`);
-      console.log(`  Tytuł:  ${itemTitle}`);
-      console.log(`  Data:   ${pubDate}`);
-      console.log(`  GUID:   ${guid.slice(0, 60)}...`);
-      console.log(`  Link:   ${item.link || "brak"}`);
-      console.log(`  Treść:  ${snippet.length} znaków`);
       anyNew = true;
       totalGenerated++;
       feedGenerated++;
 
-      // [4b] Budowa prompta
-      console.log(`\n  ──[BUDOWA PROMPTA]──`);
-      const prompt = `Jesteś polskim dziennikarzem technologicznym.
-Na podstawie poniższego angielskiego newsa napisz artykuł SEO po polsku.
+      const itemTitle = item.title || "Bez tytułu";
+      const snippet = (item.contentSnippet || item.content || "").slice(0, 4000);
 
-ORYGINALNY NEWS (EN):
-Tytuł: ${itemTitle}
-Treść: ${snippet}
+      console.log(`\n  ── NOWY #${ii + 1}: ${itemTitle.slice(0, 80)} ──`);
+      console.log(`  Treść: ${snippet.length} znaków | Link: ${item.link || "brak"}`);
 
-Zwróć TYLKO czysty JSON (bez znaczników, bez \`\`\`):
-{"title": "polski tytuł SEO",
- "desc": "meta description 150-160 znaków",
- "keywords": "słowo1, słowo2, słowo3",
- "body": " pełna treść HTML"}
+      // Warmup (first item only — model stays loaded)
+      if (feedGenerated === 1) {
+        console.log(`  ${C.dim}── warmup ──${C.rst}`);
+        const tw = Date.now();
+        try {
+          const wup = await fetch("http://localhost:11434/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: "OK" }], max_tokens: 1, think: false }),
+          });
+          const wj = await wup.json();
+          console.log(`  ${C.dim}→ ${((Date.now() - tw) / 1000).toFixed(1)}s | ${wj.usage?.total_tokens || "?"} tokenów${C.rst}`);
+        } catch (e) {
+          console.log(`  ${C.red}Warmup failed${C.rst}`);
+        }
+      }
 
-body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 500 słów. Po polsku.`;
-      const promptTokens = Math.ceil(prompt.length / 4);
-      console.log(`  Rozmiar prompta: ${prompt.length} znaków (~${promptTokens} tokenów)`);
-      if (verb) console.log(`  Treść:\n${prompt.slice(0, 800)}...\n  ${snippet.length > 200 ? `[treść newsa: ${snippet.slice(0, 200)}...]` : ""}`);
-
-      // [4c] Warmup
-      console.log(`\n  ──[OLLAMA WARMUP]──`);
-      const ollamaState = ollamaPs();
-      console.log(`  Ollama przed: ${ollamaState || "brak modelu w pamięci"}`);
-      const tw = Date.now();
+      // Generate
+      console.log(`  ${C.dim}── generowanie ──${C.rst}`);
+      let gen;
       try {
-        const wup = await fetch("http://localhost:11434/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: MODEL,
-            messages: [{ role: "user", content: "OK" }],
-            max_tokens: 1,
-            stream: false,
-            think: false,
-          }),
-        });
-        const dtWarm = ((Date.now() - tw) / 1000).toFixed(1);
-        if (!wup.ok) { console.log(`  ${C.red}Warmup: ${wup.status}${C.rst}`); continue; }
-        const wj = await wup.json();
-        console.log(`  Czas:    ${dtWarm}s`);
-        console.log(`  Model:   ${wj.model || MODEL}`);
-        console.log(`  Tokeny:  ${wj.usage?.total_tokens || "?"}`);
+        gen = await generate(itemTitle, snippet);
       } catch (e) {
-        console.log(`  ${C.red}Warmup failed: ${e.cause?.message || e.message}${C.rst}`);
+        log("ERR", `Ollama: ${e.message}`, C.red);
         continue;
       }
 
-      // [4d] Generowanie
-      console.log(`\n  ──[OLLAMA GENEROWANIE]──`);
-      const tg = Date.now();
-      let raw;
-      try {
-        const res = await fetch("http://localhost:11434/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: MODEL,
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.7,
-            max_tokens: 8192,
-            stream: false,
-            think: false,
-          }),
-        });
-        const dtGen = ((Date.now() - tg) / 1000).toFixed(1);
-        console.log(`  Status:  ${res.status} ${res.statusText}`);
-        console.log(`  Czas:    ${dtGen}s`);
-
-        if (!res.ok) {
-          const errText = await res.text();
-          console.log(`  ${C.red}Błąd ${res.status}: ${errText.slice(0, 200)}${C.rst}`);
-          continue;
-        }
-        const j = await res.json();
-        const choice = j?.choices?.[0];
-        if (!choice?.message?.content) {
-          console.log(`  ${C.red}→ Ollama nie zwróciła treści${C.rst}`);
-          if (verb) console.log(`  Raw: ${JSON.stringify(j).slice(0, 500)}`);
-          continue;
-        }
-        raw = choice.message.content;
-        const usage = j.usage || {};
-        console.log(`  Wynik:   ${raw.length} znaków`);
-        console.log(`  Usage:   ${usage.prompt_tokens || "?"} in → ${usage.completion_tokens || "?"} out (${usage.total_tokens || "?"} total)`);
-        if (verb) console.log(`  ──[RAW]──\n${raw.slice(0, 500)}...\n  ──────────`);
-      } catch (e) {
-        console.log(`  ${C.red}Ollama failed: ${e.cause?.message || e.message}${C.rst}`);
+      if (!gen.data) {
+        console.log(`  ${C.red}→ Generowanie nieudane${C.rst}`);
         continue;
       }
 
-      // [4e] Parse JSON
-      console.log(`\n  ──[PARSE JSON]──`);
-      let data;
-      try {
-        data = JSON.parse(raw.replace(/^[^{]*/, "").replace(/[^}]*$/, ""));
-        console.log(`  Status:  OK`);
-        console.log(`  title:   "${(data?.title || "").slice(0, 60)}"`);
-        console.log(`  desc:    "${(data?.desc || "").slice(0, 60)}"`);
-        console.log(`  body:    ${(data?.body || "").length} znaków`);
-      } catch {
-        data = null;
-        console.log(`  ${C.ylw}Status:  JSON niepoprawny – używam surowej odpowiedzi${C.rst}`);
+      if (gen.issues?.length) {
+        console.log(`  ${C.ylw}→ Uwagi: ${gen.issues.join(", ")}${C.rst}`);
       }
 
-      // [4f] Build HTML
-      console.log(`\n  ──[HTML]──`);
-      const artTitle = data?.title || itemTitle;
-      const desc = data?.desc || "";
-      const kws = data?.keywords || "";
-      let body = (data?.body || raw).replace(/^```html?\n?|```$/gmi, "").trim();
-      if (item.link && !body.includes(item.link)) {
-        const href = safeHref(item.link);
-        if (href) body += `\n\n<h2>Źródło</h2>\n<p><a href="${href}" rel="nofollow">${esc(item.link)}</a></p>`;
+      // Build HTML
+      const artTitle = gen.data.title || itemTitle;
+      const desc = gen.data.desc || "";
+      const kws = gen.data.keywords || "";
+      let body = (gen.data.body || gen.raw || "").replace(/```html?\n?|```$/gmi, "").trim();
+      const href = safeHref(item.link);
+      if (href && !body.includes(href)) {
+        body += `\n\n<h2>Źródło</h2>\n<p><a href="${href}" rel="nofollow">${esc(item.link)}</a></p>`;
       }
+
       if (!existsSync("articles")) mkdirSync("articles");
       const slug = artTitle.toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+        .replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
       const fname = `articles/${slug}.html`;
-      console.log(`  Tytuł:   ${artTitle}`);
-      console.log(`  Slug:    ${slug}`);
-      console.log(`  Body:    ${body.length} znaków`);
+
+      console.log(`  → Slug: ${slug} | Body: ${body.length} znaków`);
 
       const html = `<!DOCTYPE html>
 <html lang="pl">
@@ -301,53 +329,38 @@ a{color:#0366d6}
 </body>
 </html>`;
 
-      console.log(`  HTML:    ${html.length} znaków (~${Math.ceil(html.length / 1024)} KB)`);
-
-      // [4g] Zapis
       writeFileSync(fname, html, "utf8");
       console.log(`  ${C.grn}→ ZAPISANO: ${fname}${C.rst}`);
       console.log(`  ${C.cyn}→ https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}`);
     }
 
-    // [5] Update lastGuid
-    step(`[Feed ${fi + 1}] Aktualizacja lastGuid`);
     feed.lastGuid = newestGuid;
-    console.log(`  Nowy: ${newestGuid.slice(0, 60)}...`);
+    console.log(`\n  ${C.dim}lastGuid → ${newestGuid.slice(0, 50)}...${C.rst}`);
   }
 
-  // [6] Zapisz feedy
-  step("Zapis stanu feedów do feeds.json");
   writeFileSync(FEEDS_FILE, JSON.stringify(feeds, null, 2));
-  console.log(`  → feeds.json zaktualizowany (${feeds.length} feed(ów))`);
+  log("INFO", `feeds.json zapisany`);
 
-  // [7] Git
   if (anyNew) {
-    step("Git: commit i push na GitHub", C.ylw);
-    console.log(`  Pliki do dodania: articles/ + feeds.json`);
+    step("Git: commit i push", C.ylw);
     try {
-      const r1 = execSync(`git add articles/ feeds.json`, { cwd: ".", encoding: "utf8" });
-      if (r1.trim()) console.log(`  git add: ${r1.trim()}`);
-      else console.log(`  git add: OK (no output)`);
-
-      const r2 = execSync(`git commit -m "Auto: ${totalGenerated} artykuł(i) z RSS"`, { cwd: ".", encoding: "utf8" });
-      console.log(`  git commit: ${r2.trim()}`);
-
-      console.log(`  ${C.ylw}→ git push...${C.rst}`);
-      const r3 = execSync(`git push`, { cwd: ".", encoding: "utf8" });
-      console.log(`  git push: ${r3.trim()}`);
-      console.log(`  ${C.grn}→ Pushnięte na GitHub${C.rst}`);
+      const a = execSync(`git add articles/ feeds.json`, { cwd: ".", encoding: "utf8" });
+      if (a.trim()) console.log(`  add: ${a.trim()}`);
+      const c = execSync(`git commit -m "Auto: ${totalGenerated} artykuł(i) z RSS"`, { cwd: ".", encoding: "utf8" });
+      console.log(`  commit: ${c.trim()}`);
+      console.log(`  ${C.ylw}→ push...${C.rst}`);
+      const p = execSync(`git push`, { cwd: ".", encoding: "utf8" });
+      console.log(`  push: ${p.trim()}`);
       console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/articles/${C.rst}\n`);
     } catch (e) {
-      const stderr = e.stderr?.toString().slice(0, 400) || e.message;
-      console.log(`  ${C.red}Git error: ${stderr}${C.rst}`);
+      log("ERR", `Git: ${e.stderr?.toString().slice(0, 300) || e.message}`, C.red);
     }
   } else {
     step("Brak nowych wpisów – nic do roboty");
   }
 
-  // Podsumowanie
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`\n${C.grn}[${ts()}] [DONE] Czas: ${elapsed}s | Feedów: ${feeds.length} | Wygenerowano: ${totalGenerated}${C.rst}`);
+  console.log(`\n${C.grn}[${ts()}] [DONE] ${elapsed}s | Feedów: ${feeds.length} | Artykułów: ${totalGenerated}${C.rst}`);
 }
 
 main();

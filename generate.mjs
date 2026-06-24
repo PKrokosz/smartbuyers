@@ -3,244 +3,188 @@ import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { setTimeout } from "timers/promises";
 
-const MODELS = [
-  "qwen2.5:latest",
-  "qwen2.5:1.5b",
-  "qwen3.5:4b",
-  "qwen3.5:2b",
-  "qwen3.5:0.8b",
-  "(inny – wpisz ręcznie)",
-];
-
+// --- helpers ---
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
 
 const C = {
   rst: "\x1b[0m", red: "\x1b[31m", grn: "\x1b[32m",
-  ylw: "\x1b[33m", cyn: "\x1b[36m", dim: "\x1b[2m", ul: "\x1b[4m",
+  ylw: "\x1b[33m", cyn: "\x1b[36m", dim: "\x1b[2m",
 };
-function esc(s) { return `${s}`.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function esc(s) { return `${s}`.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function ts() { return new Date().toLocaleTimeString("pl-PL"); }
+
 let stepNo = 0;
+let TOTAL = 9;
 function step(label, color = C.cyn) {
   stepNo++;
   console.log(`${color}[${ts()}] [${stepNo}/${TOTAL}] ${label}${C.rst}`);
 }
-let TOTAL;
 
-function cleanup() {
-  try { rl.close(); } catch {}
+function cleanup() { try { rl.close(); } catch {} }
+
+function ollamaModels() {
+  try {
+    const out = execSync("ollama list", { encoding: "utf8", timeout: 5000 });
+    return out.trim().split("\n").slice(1).map(l => l.split(/\s+/)[0]).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
-async function main() {
-  process.on("SIGINT", () => { console.log(`\n${C.ylw}⏹ Przerwano${C.rst}`); cleanup(); process.exit(0); });
-  const start = Date.now();
-  const useOpenRouter = !!process.env.OPENROUTER_KEY;
-  const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
-  TOTAL = useOpenRouter ? 8 : 10;
+// --- prompts ---
+const SYSTEM = `Jesteś polskim ekspertem SEO i dziennikarzem. Piszesz na bloga B2B o dropshippingu, e-commerce i nowych technologiach.
 
-  console.log("╔══════════════════════════════════════╗");
-  console.log("║     Generator artykułów SEO          ║");
-  console.log(`║     Provider: ${useOpenRouter ? "OpenRouter" : "Ollama lokalnie"}           ║`);
-  console.log(`║     Steps:   ${TOTAL}                      ║`);
-  console.log("╚══════════════════════════════════════╝\n");
+Każda odpowiedź to TYLKO jeden czysty obiekt JSON — bez znaczników \`\`\`, bez komentarzy, bez dodatkowego tekstu przed ani po.
 
-  // [1] Temat
-  step("Pobieranie tematu");
-  let topic = (process.argv[2] || "").trim();
-  if (!topic) topic = (await ask("  Temat artykułu: ")).trim();
-  if (!topic) { topic = "Czym jest dropshipping B2B na platformie SelleeTools"; }
-  console.log(`  → "${topic}" (${topic.length} znaków)`);
+Przykład poprawnej odpowiedzi:
+{"title":"Jak zacząć dropshipping B2B w 2025 roku","desc":"Kompletny poradnik dropshippingu B2B. Wybór dostawców, automatyzacja sprzedaży i skalowanie na marketplace.","keywords":"dropshipping B2B, e-commerce, sprzedaż online","body":"<h2>Wprowadzenie</h2><p>Dropshipping B2B to model, w którym... <strong>kluczowe korzyści</strong> to...</p><h2>Jak zacząć</h2><p>Pierwszym krokiem jest wybór niszy...</p><ul><li>Zbadaj rynek</li><li>Znajdź dostawców</li><li>Zautomatyzuj procesy</li></ul><h2>Podsumowanie</h2><p>Dropshipping B2B oferuje ogromny potencjał wzrostu...</p>"}
 
-  // [2] Model
-  step("Wybór modelu AI");
-  let model = (process.argv[3] || "").trim();
-  if (!model) {
-    console.log("  Modele:");
-    MODELS.forEach((m, i) => console.log(`    ${i + 1}. ${m}`));
-    const pick = parseInt(await ask(`  Wybierz (1-${MODELS.length}): `), 10);
-    if (pick > 0 && pick <= MODELS.length) {
-      model = MODELS[pick - 1];
-      if (model === "(inny – wpisz ręcznie)") model = await ask("  Nazwa modelu: ");
-    } else {
-      model = "qwen2.5:latest";
-    }
-  }
-  console.log(`  → ${model}`);
-  if (model.startsWith("qwen3.5")) console.log(`  ℹ️  qwen3.5 z think:false (wyłączony reasoning)`);
+body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 500 słów. Po polsku.`;
 
-  // [3] Katalog
-  step("Przygotowanie katalogu wyjściowego");
-  if (!existsSync("articles")) { mkdirSync("articles"); console.log("  → Utworzono articles/"); }
-  else { console.log("  → articles/ istnieje"); }
+function userPrompt(topic) {
+  return `Napisz artykuł SEO na bloga B2B.\n\nTemat: "${topic}"\n\nZwracasz WYŁĄCZNIE czysty JSON z polami: title, desc, keywords, body.`;
+}
 
-  // [4] Prompt
-  step("Budowa prompta");
-  const PROMPT = `Jesteś ekspertem SEO. Napisz artykuł na blog.
-Temat: "${topic}"
+// --- validation ---
+function validate(data, raw) {
+  const issues = [];
+  const body = data?.body || raw || "";
+  const words = body.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+  const hasH2 = /<h2[^>]*>/i.test(body);
+  const desc = (data?.desc || "").trim();
 
-Zwróć TYLKO czysty JSON (bez znaczników, bez \`\`\`):
-{"title": "polski tytuł SEO",
- "desc": "meta description 150-160 znaków",
- "keywords": "słowo1, słowo2, słowo3",
- "body": " pełna treść HTML"}
+  if (!data?.title) issues.push("brak tytułu");
+  if (!data?.body) issues.push("brak treści (body)");
+  if (words < 250) issues.push(`za mało słów (${words}, min 250)`);
+  if (!hasH2) issues.push("brak <h2>");
+  if (desc.length < 50) issues.push(`meta desc za krótkie (${desc.length} znaków)`);
 
-body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. Po polsku.`;
-  const promptTokens = Math.ceil(PROMPT.length / 4);
-  console.log(`  → ${PROMPT.length} znaków (~${promptTokens} tokenów)`);
-  if (verb) console.log(`  ──[PROMPT]──\n${PROMPT}\n  ────────────`);
+  return { ok: issues.length === 0, issues, words, hasH2 };
+}
 
-  const ollamaUrl = "http://localhost:11434/v1/chat/completions";
-  const orUrl = "https://openrouter.ai/api/v1/chat/completions";
-  const url = useOpenRouter ? orUrl : ollamaUrl;
-  const headers = { "Content-Type": "application/json" };
-  if (useOpenRouter) headers["Authorization"] = `Bearer ${process.env.OPENROUTER_KEY}`;
+// --- streaming reader ---
+async function streamResponse(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let full = "";
+  let tick = 0;
 
-  // [5] Warmup (Ollama only)
-  if (!useOpenRouter) {
-    step("Warmup modelu – ładowanie do pamięci", C.ylw);
-    console.log(`  → Model: ${model}`);
-    console.log(`  → URL:   POST ${url}`);
-    const t0 = Date.now();
-    try {
-      const wup = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: "OK" }],
-          max_tokens: 1,
-          stream: false,
-          think: false,
-        }),
-      });
-      const dt = ((Date.now() - t0) / 1000).toFixed(1);
-      if (!wup.ok) { console.log(`  ${C.red}→ Błąd ${wup.status}${C.rst}`); rl.close(); process.exit(1); }
-      const wj = await wup.json();
-      const tokens = wj.usage?.total_tokens || "?";
-      const modelLoaded = wj.model || model;
-      console.log(`  → ${C.grn}Model gotowy${C.rst} | ${modelLoaded} | ${dt}s | ${tokens} tokenów warmupu`);
-    } catch (e) {
-      console.log(`  ${C.red}→ Warmup failed: ${e.cause?.message || e.message}${C.rst}`);
-      rl.close(); process.exit(1);
-    }
-  }
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
 
-  // [6] Generowanie
-  step("Generowanie artykułu przez AI", C.ylw);
-  const genStart = Date.now();
-  console.log(`  → Model: ${model}`);
-  console.log(`  → Max tokens: 8192 | Temperature: 0.7 | think: ${useOpenRouter ? "default" : "false"}`);
-  if (verb) console.log(`  → Body: ${JSON.stringify({ model, max_tokens: 8192, temperature: 0.7, messages: [{ role: "user", content: PROMPT.slice(0, 100) + "..." }] })}`);
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() || "";
 
-  const ac = new AbortController();
-  let prompted = false;
-  let ollamaWatch;
-
-  if (!useOpenRouter) {
-    ollamaWatch = setInterval(() => {
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith("data:")) continue;
+      const json = t.slice(5).trim();
+      if (json === "[DONE]") continue;
       try {
-        const ps = execSync("ollama ps", { encoding: "utf8", timeout: 3000 }).trim();
-        if (ps && !ps.includes("NAME")) { // has data
-          const lines = ps.split("\n").filter(l => l.trim());
-          if (lines.length > 1) {
-            console.log(`  ${C.dim}[ollama ps] ${lines[1].trim()}${C.rst}`);
-          }
+        const p = JSON.parse(json);
+        const delta = p.choices?.[0]?.delta?.content;
+        if (delta) {
+          full += delta;
+          tick++;
+          if (tick % 40 === 0) process.stdout.write(`\r  → Strumień: ${full.length} znaków...`);
         }
       } catch {}
-    }, 30000);
+    }
+  }
+  process.stdout.write(`\r  → Strumień: ${full.length} znaków (gotowe)    \n`);
+  return full;
+}
+
+// --- generation with retry ---
+async function generate(model, topic, attempt = 0) {
+  const isOllama = !process.env.OPENROUTER_KEY;
+  const url = isOllama
+    ? "http://localhost:11434/v1/chat/completions"
+    : "https://openrouter.ai/api/v1/chat/completions";
+  const headers = { "Content-Type": "application/json" };
+  if (!isOllama) headers["Authorization"] = `Bearer ${process.env.OPENROUTER_KEY}`;
+
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: SYSTEM },
+      { role: "user", content: userPrompt(topic) },
+    ],
+    temperature: 0.3,
+    max_tokens: 8192,
+    stream: true,
+  };
+  if (isOllama) {
+    body.response_format = { type: "json_object" };
+    body.think = false;
+  } else {
+    body.response_format = { type: "json_object" };
   }
 
-  const statusLoop = (async () => {
-    while (!ac.signal.aborted) {
-      await setTimeout(30000);
-      const elapsed = ((Date.now() - genStart) / 1000).toFixed(0);
-      if (!prompted && elapsed >= 120) {
-        prompted = true;
-        const answer = await ask(`\n${C.ylw}  ⏳ Generowanie trwa już ${elapsed}s. Naciśnij Enter czekać, lub "q"+Enter przerwać:${C.rst} `);
-        if (answer.trim().toLowerCase() === "q") {
-          ac.abort();
-          console.log(`  → Przerwano przez użytkownika`);
-          rl.close(); process.exit(0);
-        }
-        console.log(`  → Kontynuuję...\n`);
-      } else {
-        console.log(`  ${C.dim}[⏱ ${elapsed}s] Oczekiwanie na odpowiedź Ollamy...${C.rst}`);
-      }
-    }
-  })();
+  if (attempt > 0) console.log(`\n  ${C.ylw}── RETRY ${attempt + 1}/2 ──${C.rst}`);
+  console.log(`  → Wysyłam zapytanie...`);
+  const t0 = Date.now();
 
-  let raw;
+  let res;
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      signal: ac.signal,
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: PROMPT }],
-        temperature: 0.7,
-        max_tokens: 8192,
-        ...(useOpenRouter ? {} : { think: false }),
-      }),
-    });
-    ac.abort();
-    clearInterval(ollamaWatch);
-    ollamaWatch = null;
-
-    const genTime = ((Date.now() - genStart) / 1000).toFixed(1);
-    console.log(`  → Status: ${res.status} ${res.statusText}`);
-    console.log(`  → Czas generowania: ${genTime}s`);
-
-    if (!res.ok) {
-      const err = await res.text();
-      console.log(`  ${C.red}→ Błąd ${res.status}: ${err.slice(0, 300)}${C.rst}`);
-      rl.close(); process.exit(1);
-    }
-
-    const j = await res.json();
-    const choice = j?.choices?.[0];
-    if (!choice?.message?.content) {
-      console.log(`  ${C.red}→ Ollama nie zwróciła treści${C.rst}`);
-      if (verb) console.log(`  Raw response: ${JSON.stringify(j).slice(0, 500)}`);
-      rl.close(); process.exit(1);
-    }
-    raw = choice.message.content;
-    console.log(`  → ${C.grn}Odebrano${C.rst} | ${raw.length} znaków`);
-    if (verb) console.log(`  ──[RAW]──\n${raw.slice(0, 500)}...\n  ──────────`);
+    res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
   } catch (e) {
-    if (ollamaWatch) clearInterval(ollamaWatch);
-    if (e.name === "AbortError") { console.log(`  → Przerwano przez użytkownika`); }
-    else { console.log(`  ${C.red}→ Błąd: ${e.cause?.message || e.message}${C.rst}`); }
-    rl.close(); process.exit(1);
+    throw new Error(`fetch failed: ${e.cause?.message || e.message}`);
   }
 
-  // [7] Parse JSON
-  step("Parsowanie odpowiedzi JSON");
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const raw = await streamResponse(res);
+  const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`  → Czas: ${dt}s | ${res.status}`);
+
   let data;
-  try {
-    data = JSON.parse(raw.replace(/^[^{]*/, "").replace(/[^}]*$/, ""));
-    console.log(`  → title:   "${(data?.title || "").slice(0, 60)}"`);
-    console.log(`  → desc:    "${(data?.desc || "").slice(0, 60)}"`);
-    console.log(`  → keywords: "${(data?.keywords || "").slice(0, 60)}"`);
-    console.log(`  → body:    ${(data?.body || "").length} znaków`);
-  } catch {
-    data = null;
-    console.log(`  ${C.ylw}→ JSON niepoprawny, używam surowej odpowiedzi${C.rst}`);
+  try { data = JSON.parse(raw); } catch {
+    try {
+      const cleaned = raw.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      data = JSON.parse(cleaned);
+    } catch {
+      data = null;
+    }
   }
 
-  // [8] Build HTML
-  step("Generowanie dokumentu HTML");
+  if (!data) {
+    const rawFile = `articles/.raw-${Date.now()}.txt`;
+    writeFileSync(rawFile, raw, "utf8");
+    console.log(`  ${C.ylw}→ JSON niepoprawny — surowa odpowiedź zapisana do ${rawFile}${C.rst}`);
+    return { data: null, raw, valid: false, issues: ["JSON parse failed"] };
+  }
+
+  console.log(`  → title: "${(data.title || "").slice(0, 60)}"`);
+  console.log(`  → body:  ${(data.body || "").length} znaków`);
+
+  const v = validate(data, raw);
+  console.log(`  → Słowa: ${v.words} | H2: ${v.hasH2 ? "✅" : "❌"} | Desc: ${(data.desc || "").length} znaków`);
+
+  if (!v.ok && attempt < 1) {
+    console.log(`  ${C.ylw}→ Walidacja niezaliczona: ${v.issues.join(", ")}${C.rst}`);
+    return generate(model, topic, attempt + 1);
+  }
+
+  return { data, raw, valid: v.ok, issues: v.issues };
+}
+
+// --- html builder ---
+function buildHtml(data, raw, topic, model) {
   const artTitle = data?.title || topic;
   const desc = data?.desc || "";
   const kws = data?.keywords || "";
-  const body = (data?.body || raw).replace(/^```html?\n?|```$/gmi, "").trim();
+  const body = (data?.body || raw || "").replace(/```html?\n?|```$/gmi, "").trim();
   const slug = artTitle.toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+    .replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
   const fname = `articles/${slug}.html`;
-  console.log(`  → Tytuł:   ${artTitle}`);
-  console.log(`  → Slug:    ${slug}`);
-  console.log(`  → Body:    ${body.length} znaków`);
 
   const html = `<!DOCTYPE html>
 <html lang="pl">
@@ -271,26 +215,157 @@ a{color:#0366d6}
 <body>
 <h1>${esc(artTitle)}</h1>
 <article>${body}</article>
-<div class="footer">Artykuł wygenerowany przez AI · data: ${new Date().toLocaleDateString("pl-PL")}</div>
+<div class="footer">Artykuł wygenerowany przez AI · model: ${model} · data: ${new Date().toLocaleDateString("pl-PL")}</div>
 </body>
 </html>`;
 
-  console.log(`  → HTML:    ${html.length} znaków (~${Math.ceil(html.length / 1024)} KB)`);
+  return { html, fname, body, slug, artTitle };
+}
 
-  // [9] Save
+// --- main ---
+async function main() {
+  process.on("SIGINT", () => { console.log(`\n${C.ylw}⏹ Przerwano${C.rst}`); cleanup(); process.exit(0); });
+  const start = Date.now();
+  const useOpenRouter = !!process.env.OPENROUTER_KEY;
+  const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
+
+  console.log("╔══════════════════════════════════════╗");
+  console.log("║     Generator artykułów SEO v2       ║");
+  console.log(`║     Provider: ${useOpenRouter ? "OpenRouter" : "Ollama lokalnie"}           ║`);
+  console.log("╚══════════════════════════════════════╝\n");
+
+  // [1] Topic
+  step("Pobieranie tematu");
+  let topic = (process.argv[2] || "").trim();
+  if (!topic) topic = (await ask("  Temat artykułu: ")).trim();
+  if (!topic) { topic = "Czym jest dropshipping B2B na platformie SelleeTools"; console.log(`  → Domyślny: "${topic}"`); }
+  else console.log(`  → "${topic}" (${topic.length} znaków)`);
+
+  // [2] Model
+  step("Wybór modelu AI");
+  let model = (process.argv[3] || "").trim();
+
+  if (!useOpenRouter) {
+    const models = ollamaModels();
+    if (models.length === 0) {
+      console.log(`  ${C.red}→ Brak modeli w Ollamie – uruchom 'ollama serve' i ściągnij przynajmniej jeden model${C.rst}`);
+      cleanup(); process.exit(1);
+    }
+
+    if (!model) {
+      console.log("  Dostępne modele:");
+      models.forEach((m, i) => console.log(`    ${i + 1}. ${m}`));
+      const pick = parseInt(await ask(`  Wybierz (1-${models.length}, Enter=domyślny): `), 10);
+      model = models[pick - 1] || models[0];
+    } else if (!models.includes(model)) {
+      console.log(`  ${C.ylw}→ Model "${model}" nie znaleziony lokalnie – używam ${models[0]}${C.rst}`);
+      model = models[0];
+    }
+  } else {
+    if (!model) model = "qwen/qwen-2.5-7b-instruct";
+  }
+
+  console.log(`  → ${model}`);
+  if (!useOpenRouter && model.startsWith("qwen3.5")) {
+    console.log(`  ${C.dim}ℹ️  qwen3.5 — think:false (reasoning wyłączony)${C.rst}`);
+  }
+
+  // [3] Dir
+  step("Katalog wyjściowy");
+  if (!existsSync("articles")) { mkdirSync("articles"); console.log("  → Utworzono articles/"); }
+  else console.log("  → articles/ istnieje");
+
+  // [4] Prompt info
+  step("Prompt");
+  const up = userPrompt(topic);
+  console.log(`  → System: ${SYSTEM.length} znaków (~${Math.ceil(SYSTEM.length / 4)} tokenów)`);
+  console.log(`  → User:   ${up.length} znaków (~${Math.ceil(up.length / 4)} tokenów)`);
+  console.log(`  → Temp: 0.3 | response_format: json_object | max_tokens: 8192`);
+  if (verb) {
+    console.log(`\n  ${C.dim}──SYSTEM PROMPT──${C.rst}`);
+    console.log(SYSTEM.split("\n").map(l => `  ${C.dim}|${C.rst} ${l}`).join("\n"));
+    console.log(`\n  ${C.dim}──USER PROMPT──${C.rst}`);
+    console.log(up.split("\n").map(l => `  ${C.dim}|${C.rst} ${l}`).join("\n"));
+  }
+
+  // [5] Warmup (Ollama only)
+  if (!useOpenRouter) {
+    step("Warmup modelu", C.ylw);
+    const tw = Date.now();
+    try {
+      const wup = await fetch("http://localhost:11434/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "OK" }], max_tokens: 1, think: false }),
+      });
+      const dt = ((Date.now() - tw) / 1000).toFixed(1);
+      if (!wup.ok) { console.log(`  ${C.red}→ Warmup: ${wup.status}${C.rst}`); cleanup(); process.exit(1); }
+      const wj = await wup.json();
+      console.log(`  → ${wj.model || model} | ${dt}s | ${wj.usage?.total_tokens || "?"} tokenów`);
+    } catch (e) {
+      console.log(`  ${C.red}→ Warmup failed: ${e.cause?.message || e.message}${C.rst}`);
+      cleanup(); process.exit(1);
+    }
+  }
+
+  // [6] Generate (with streaming + retry)
+  step("Generowanie artykułu", C.ylw);
+  const genStart = Date.now();
+  let completed = false;
+
+  // background status (no readline interference)
+  const statusLoop = (async () => {
+    while (!completed) {
+      await setTimeout(30000);
+      if (completed) break;
+      const elapsed = ((Date.now() - genStart) / 1000).toFixed(0);
+      console.log(`\n  ${C.dim}[⏱ ${elapsed}s] Wciąż generuję...${C.rst}`);
+    }
+  })();
+
+  let result;
+  try {
+    result = await generate(model, topic);
+  } catch (e) {
+    completed = true;
+    console.log(`  ${C.red}→ ${e.message}${C.rst}`);
+    cleanup(); process.exit(1);
+  }
+  completed = true;
+
+  if (!result.data) {
+    console.log(`  ${C.red}→ Nie udało się wygenerować artykułu${C.rst}`);
+    if (result.raw) {
+      const rawFile = `articles/.raw-${Date.now()}.txt`;
+      writeFileSync(rawFile, result.raw, "utf8");
+      console.log(`  → Surowa odpowiedź: ${rawFile}`);
+    }
+    cleanup(); process.exit(1);
+  }
+
+  if (result.issues?.length) {
+    console.log(`  ${C.ylw}→ Uwagi: ${result.issues.join(", ")}${C.rst}`);
+  }
+
+  // [7] Build HTML
+  step("Generowanie dokumentu HTML");
+  const { html, fname, body, slug, artTitle } = buildHtml(result.data, result.raw, topic, model);
+  console.log(`  → Tytuł:  ${artTitle.slice(0, 60)}`);
+  console.log(`  → Slug:   ${slug}`);
+  console.log(`  → Body:   ${body.length} znaków`);
+  console.log(`  → HTML:   ${html.length} znaków (~${Math.ceil(html.length / 1024)} KB)`);
+
+  // [8] Save
   step("Zapis pliku");
   writeFileSync(fname, html, "utf8");
-  const fsize = `${(html.length / 1024).toFixed(1)} KB`;
-  console.log(`  → ${C.grn}Zapisano${C.rst} ${fname} (${fsize})`);
-  console.log(`  → Ścieżka: ${fname}`);
+  console.log(`  → ${C.grn}Zapisano${C.rst} ${fname} (${(html.length / 1024).toFixed(1)} KB)`);
 
-  // [10] Done
+  // [9] Done
   step("Podsumowanie", C.grn);
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`  → Czas całkowity: ${elapsed}s`);
-  console.log(`  → Rozmiar treści: ${body.length} znaków`);
-  console.log(`  → Plik:          ${fname}`);
+  console.log(`  → Czas:  ${elapsed}s`);
+  console.log(`  → Model: ${model} | Body: ${body.length} znaków`);
   console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}\n`);
-  rl.close();
+  cleanup();
 }
 main();
