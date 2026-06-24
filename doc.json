@@ -1,0 +1,22 @@
+{
+  "$schema": "./schemas/doc-config.schema.json",
+  "version": "1.0",
+  "spec": "generic",
+  "output": { "format": "markdown", "filename": "README.md" },
+  "packages": [
+    {
+      "path": "./",
+      "title": "SmartBuyers — AI Content Engine",
+      "include_in_root": true,
+      "sections": ["overview", "installation", "usage"]
+    }
+  ],
+  "root": {
+    "output": "README.md",
+    "sections": [
+      { "type": "static", "file": "docs/intro.md" },
+      { "type": "static", "file": "docs/installation.md" },
+      { "type": "static", "file": "docs/usage.md" }
+    ]
+  }
+}
