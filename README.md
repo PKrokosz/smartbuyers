@@ -11,7 +11,10 @@ smartbuyers/
 ├── _config.yml          # Konfiguracja GitHub Pages (motyw Cayman)
 ├── _posts/              # Posty Jekyll (markdown, data w nazwie)
 ├── articles/            # Wygenerowane artykuły HTML (autonomiczne strony)
-├── generate.mjs         # Generator artykułów SEO przez AI
+├── generate.mjs         # Generator artykułów SEO przez AI (interaktywny)
+├── rss-watch.mjs        # Automat: RSS → AI → HTML → git push
+├── feeds.json           # Konfiguracja RSS feedów
+├── package.json         # Zależności Node (rss-parser)
 ├── index.md             # Główna strona (karta wiedzy SelleeTools)
 ├── blog.md              # Podstrona bloga
 └── README.md            # Ten plik
@@ -82,3 +85,35 @@ git push
 
 > Artykuły HTML w `articles/` są autonomiczne – zawierają pełny `<html>` z inline CSS, nie wymagają Jekyll.
 > Posty w `_posts/` to markdown dla bloga Jekyll.
+
+## Automat: RSS → AI → Blog (`rss-watch.mjs`)
+
+Skrypt pobiera angielskie newsy z RSS (TechCrunch AI), tłumaczy i przerabia na polskie artykuły SEO przez Ollamę, zapisuje do `articles/` i auto-pushuje na GitHub.
+
+### Instalacja
+
+```
+npm install
+```
+
+### Użycie
+
+```powershell
+node rss-watch.mjs
+```
+
+Pierwsze uruchomienie zapamiętuje najnowszy wpis. Kolejne generują artykuły dla nowych newsów i pusłują na GitHub.
+
+### Konfiguracja (`feeds.json`)
+
+```json
+[
+  {
+    "name": "TechCrunch AI",
+    "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "lastGuid": null
+  }
+]
+```
+
+Dodaj dowolny RSS feed. `lastGuid` jest aktualizowany automatycznie przy każdym uruchomieniu.

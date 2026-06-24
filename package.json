@@ -1,0 +1,24 @@
+{
+  "name": "smartbuyers",
+  "version": "1.0.0",
+  "description": "Strona publikowana na GitHub Pages: [https://pkrokosz.github.io/smartbuyers/](https://pkrokosz.github.io/smartbuyers/)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PKrokosz/smartbuyers.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/PKrokosz/smartbuyers/issues"
+  },
+  "homepage": "https://github.com/PKrokosz/smartbuyers#readme",
+  "dependencies": {
+    "rss-parser": "^3.13.0"
+  }
+}
