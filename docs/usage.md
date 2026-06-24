@@ -98,3 +98,12 @@ Każdy wygenerowany artykuł zawiera:
 ```
 
 Tryb 2 (ręczny RSS) i Tryb 3 (auto) sprawdzają ten plik — ten sam news nigdy nie jest generowany dwa razy.
+
+---
+
+## Zmienne środowiskowe
+
+| Zmienna | Wymagana | Opis |
+|---------|----------|------|
+| `GOOGLE_INDEXING_KEY` | Opcjonalna | Token OAuth 2.0 do Google Indexing API. Po pushu nowego artykułu pinguje Google żeby przyspieszyć crawlowanie. Pobierz z Google Cloud Console → APIs & Services → Credentials. |
+| `OPENROUTER_KEY` | Opcjonalna | Klucz API OpenRouter. Gdy ustawiony, używa OpenRouter zamiast lokalnej Ollamy. |

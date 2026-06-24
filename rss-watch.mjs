@@ -1,14 +1,15 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
 import Parser from "rss-parser";
-import { C, ts, stepReset, step, log, loadGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
+import { C, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
 
 const FEEDS_FILE = "feeds.json";
-const MODEL = "qwen2.5:1.5b";
+const mi = process.argv.indexOf("--model"); const MODEL = (mi >= 0 && mi + 1 < process.argv.length) ? process.argv[mi + 1] : "gemma4:e4b";
 const MAX_ITEMS_PER_FEED = 5;
 const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
 const flagReview = process.argv.includes("--review");
 const flagDigest = process.argv.includes("--digest");
+const queryCount = (() => { const i = process.argv.indexOf("--queries"); return (i >= 0 && i + 1 < process.argv.length) ? parseInt(process.argv[i + 1], 10) || 0 : 0; })();
 
 const optFormat  = flagDigest ? "digest" : parseFlag(process.argv, "--format", FORMATS, DEF_FORMAT);
 const optPersona = parseFlag(process.argv, "--persona", PERSONAS, DEF_PERSONA);
@@ -57,14 +58,14 @@ async function generateDigest(items) {
 // --- save article ---
 function saveArticle(gen, title, link) {
   const extra = link ? { sourceLink: link, sourceLabel: title, format: optFormat } : { format: optFormat };
-  const { html, fname, body, slug, artTitle } = buildHtml(gen.data, gen.raw, title, MODEL, extra);
+  const { html, fname, body, slug, artTitle, pageUrl } = buildHtml(gen.data, gen.raw, title, MODEL, extra);
   console.log(`  → ${slug} | ${body.length} zn`);
   if (!existsSync("articles")) mkdirSync("articles");
   writeFileSync(fname, html, "utf8");
   if (link) markGen(link, slug);
   console.log(`  ${C.grn}→ ${fname}${C.rst}`);
-  console.log(`  ${C.cyn}→ https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}`);
-  return { slug, fname };
+  console.log(`  ${C.cyn}→ ${pageUrl}${C.rst}`);
+  return { slug, fname, pageUrl };
 }
 
 // --- keyword filter ---
@@ -98,14 +99,34 @@ async function main() {
   stepReset(99); step("Wczytywanie feedów");
   if (!existsSync(FEEDS_FILE)) { log("ERR", `Brak ${FEEDS_FILE}`, C.red); process.exit(1); }
   const feeds = JSON.parse(readFileSync(FEEDS_FILE, "utf8"));
+
+  // dynamiczne feedy z rotacji zapytań Google News
+  if (queryCount > 0 && existsSync("queries.json")) {
+    const qdb = JSON.parse(readFileSync("queries.json", "utf8"));
+    const pool = [...(qdb.pool || [])];
+    const selected = [];
+    for (let i = 0; i < queryCount && pool.length > 0; i++) {
+      const idx = Math.floor(Math.random() * pool.length);
+      selected.push(pool.splice(idx, 1)[0]);
+    }
+    const langSuffix = optLang === "pl" ? "&hl=pl&gl=PL&ceid=PL:pl" : "&hl=en&gl=US&ceid=US:en";
+    for (const q of selected) {
+      const lastGuid = qdb.lastGuids?.[q] || null;
+      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}${langSuffix}`;
+      feeds.push({ name: `Google News: ${q}`, url, filter: q.toLowerCase().split(/\s+/), lastGuid, _query: q });
+    }
+    console.log(`  ${C.dim}→ +${selected.length} dynamicznych feed(ów) z zapytań${C.rst}`);
+  }
+
   log("INFO", `${feeds.length} feed(ów)`);
   feeds.forEach((f, i) => {
-    const kw = f.filter ? ` [filtr: ${f.filter.join(", ")}]` : "";
+    const kw = f.filter ? ` [filtr: ${f.filter.some(f=>typeof f!=='string') ? '(dynamic)' : f.filter.slice(0,3).join(",")}]` : "";
     console.log(`  ${i + 1}. ${f.name || f.url}${kw} | lastGuid: ${f.lastGuid ? f.lastGuid.slice(0, 30) + "..." : "BRAK"}`);
   });
 
   const parser = new Parser();
   let totalGenerated = 0;
+  let lastPageUrl;
   const digestItems = [];
 
   for (const [fi, feed] of feeds.entries()) {
@@ -178,7 +199,8 @@ async function main() {
       if (!gen.data) { console.log(`  ${C.red}→ Nieudane${C.rst}`); continue; }
       if (gen.issues?.length) console.log(`  ${C.ylw}→ ${gen.issues.join(", ")}${C.rst}`);
 
-      saveArticle(gen, itemTitle, itemLink);
+      const sa = saveArticle(gen, itemTitle, itemLink);
+      if (sa) lastPageUrl = sa.pageUrl;
     }
 
     if (newCount > 0) console.log(`  → Nowych: ${newCount}${feed.filter ? ` (filtr: ${feed.filter.join(", ")})` : ""}`);
@@ -196,18 +218,33 @@ async function main() {
       if (dig && dig.data) {
         totalGenerated++;
         const sources = digestItems.map(it => it.link).filter(Boolean).join(" | ");
-        saveArticle(dig, `Przegląd tygodnia: ${new Date().toLocaleDateString("pl-PL")}`, sources);
+        const sa = saveArticle(dig, `Przegląd tygodnia: ${new Date().toLocaleDateString("pl-PL")}`, sources);
+        if (sa) lastPageUrl = sa.pageUrl;
         for (const it of digestItems) if (it.link) markGen(it.link, "digest");
       }
     }
   }
 
+  // zapisz lastGuids dynamicznych zapytań
+  if (queryCount > 0 && existsSync("queries.json")) {
+    const qdb = JSON.parse(readFileSync("queries.json", "utf8"));
+    if (!qdb.lastGuids) qdb.lastGuids = {};
+    for (const f of feeds) {
+      if (f._query && f.lastGuid) qdb.lastGuids[f._query] = f.lastGuid;
+    }
+    writeFileSync("queries.json", JSON.stringify(qdb, null, 2));
+  }
+
+  // usuń pola _query przed zapisem do feeds.json
+  for (const f of feeds) delete f._query;
   writeFileSync(FEEDS_FILE, JSON.stringify(feeds, null, 2));
   generateIndex(); generateSitemap(); generateFeed();
 
   if (totalGenerated > 0) {
     step("Git push", C.ylw);
-    gitPush("articles/ feeds.json generated.json", `Auto: ${totalGenerated} artykuł(i) z RSS`);
+    if (gitPush("articles/ feeds.json generated.json", `Auto: ${totalGenerated} artykuł(i) z RSS`)) {
+      if (lastPageUrl) googleIndexingPing(lastPageUrl);
+    }
     console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/articles/${C.rst}\n`);
   } else {
     step("Brak nowych wpisów");

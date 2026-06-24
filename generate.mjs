@@ -2,7 +2,7 @@ import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { createInterface } from "readline";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
-import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
+import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
@@ -191,7 +191,7 @@ async function main() {
   // [7] Build HTML
   step("Generowanie dokumentu HTML");
   const extra = rssSourceLink ? { sourceLink: rssSourceLink, sourceLabel: rssSourceLabel, format: optFormat } : { format: optFormat };
-  const { html, fname, body, slug, artTitle } = buildHtml(result.data, result.raw, topic, model, extra);
+  const { html, fname, body, slug, artTitle, pageUrl } = buildHtml(result.data, result.raw, topic, model, extra);
   console.log(`  → ${artTitle.slice(0, 60)} | ${slug}`);
   console.log(`  → Body: ${body.length} zn | HTML: ${html.length} zn (~${Math.ceil(html.length/1024)} KB)`);
 
@@ -218,7 +218,9 @@ async function main() {
   if (flagPush) {
     step("Git push", C.ylw);
     const files = rssSourceLink ? "articles/ generated.json" : "articles/";
-    gitPush(files, `Add: ${artTitle.slice(0, 60)}`);
+    if (gitPush(files, `Add: ${artTitle.slice(0, 60)}`)) {
+      googleIndexingPing(pageUrl);
+    }
   }
 
   // Done
