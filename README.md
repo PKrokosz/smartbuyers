@@ -104,6 +104,21 @@ Po każdej generacji:
 | `--rss URL` | Pobiera RSS, pokazuje picker newsów |
 | `--push` | Auto git commit + push po zapisie |
 | `--verbose` / `-v` | Pełny prompt i surowa odpowiedź |
+| `--format X` | Typ artykułu: `article`, `list`, `howto`, `explainer`, `vs`, `myth`, `faq`, `digest`, `opinion` |
+| `--persona X` | Styl pisania: `journalist`, `marketer`, `technical`, `ceo`, `customer` |
+| `--tone X` | Ton: `casual`, `formal`, `educational`, `urgent` |
+| `--lang X` | Język wyjściowy: `pl`, `en` |
+
+```powershell
+# Artykuł w formacie Top 5, styl marketera, swobodny ton
+node generate.mjs --format list --persona marketer --tone casual "Narzędzia dropshipping"
+
+# Poradnik how-to po angielsku
+node generate.mjs --format howto --lang en "How to start dropshipping"
+
+# FAQ z RSS, formalny ton
+node generate.mjs --rss https://techcrunch.com/category/ai/feed/ --format faq --tone formal --push
+```
 
 ### `rss-watch.mjs`
 
@@ -111,6 +126,10 @@ Po każdej generacji:
 |-------|------|
 | `--review` | Pyta przed każdym newsem: `[g]/[p]/[q]` |
 | `--verbose` / `-v` | Pełny prompt i surowa odpowiedź |
+| `--format X` | J.w. (8 typów) |
+| `--persona X` | J.w. (5 stylów) |
+| `--tone X` | J.w. (4 tony) |
+| `--lang X` | J.w. (`pl`, `en`) |
 
 ---
 
@@ -119,7 +138,7 @@ Po każdej generacji:
 Zobacz [ROADMAP.md](ROADMAP.md) — 5 faz do jakości narzędzi klasy TRYSORO:
 
 1. ✅ Fundament (shared module, Schema.org, sitemap, index)
-2. 🔜 Content diversity (8 formatów, 5 person, 4 tony, 2 języki)
+2. ✅ Content diversity (8 formatów, 5 person, 4 tony, 2 języki)
 3. 🔜 RSS intelligence (10+ feedów, filtrowanie, digest mode)
 4. 📋 Content intelligence (internal linking, FAQ schema, gap analyzer)
 5. 📋 Dystrybucja (RSS feed bloga, social auto-post, newsletter)

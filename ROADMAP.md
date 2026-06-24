@@ -83,9 +83,7 @@ Po każdym pushu: `POST https://indexing.googleapis.com/v3/urlNotifications:publ
 
 ---
 
-## Faza 2: Content diversity (2-3 dni)
-
-Każdy format, persona i ton to **wariant prompta**. Architektura już na to pozwala — `generate()` przyjmuje `systemPrompt` i `userContent` jako parametry.
+## Faza 2: Content diversity ✅ ZREALIZOWANE
 
 ### 2.1 `--format` — 8 typów artykułów
 
