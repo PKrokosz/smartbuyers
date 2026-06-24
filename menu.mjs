@@ -1,5 +1,5 @@
 import { createInterface } from "readline";
-import { spawnSync } from "child_process";
+import { spawn } from "child_process";
 import { existsSync } from "fs";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -9,8 +9,9 @@ function run(cmd, ...args) {
   rl.close();
   const full = [cmd, ...args];
   console.log(`\n  → node ${full.join(" ")}\n`);
-  const r = spawnSync("node", full, { cwd: process.cwd(), stdio: "inherit" });
-  if (r.error) console.error(`  Błąd: ${r.error.message}`);
+  const child = spawn("node", full, { cwd: process.cwd(), stdio: "inherit" });
+  child.on("exit", code => process.exit(code || 0));
+  child.on("error", e => { console.error(`  Błąd: ${e.message}`); process.exit(1); });
 }
 
 async function main() {

@@ -193,16 +193,17 @@ a{color:#0366d6}
 
 // --- git ---
 function gitPush(files, msg) {
-  log("GIT", `Commit + push...`, C.ylw);
+  console.log(`  ${C.ylw}→ Commit + push...${C.rst}`);
+  const safeMsg = msg.replace(/"/g, "\\\"");
   try {
     execSync(`git add ${files}`, { cwd: ".", encoding: "utf8" });
-    const c = execSync(`git commit -m "${msg}"`, { cwd: ".", encoding: "utf8" });
+    const c = execSync(`git commit -m "${safeMsg}"`, { cwd: ".", encoding: "utf8" });
     console.log(`  → ${c.toString().trim()}`);
     execSync(`git push`, { cwd: ".", encoding: "utf8" });
-    log("GIT", "Pushnięte ✅", C.grn);
+    console.log(`  ${C.grn}→ Pushnięte ✅${C.rst}`);
     return true;
   } catch (e) {
-    log("GIT", `Błąd: ${e.stderr?.toString().slice(0, 200) || e.message}`, C.red);
+    console.log(`  ${C.red}→ Git błąd: ${e.stderr?.toString().slice(0, 200) || e.message}${C.rst}`);
     return false;
   }
 }
