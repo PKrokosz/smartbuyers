@@ -54,6 +54,15 @@ Zwróć TYLKO czysty JSON (bez znaczników, bez \`\`\`):
 
 body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. Po polsku.`;
 
+  // kolory ANSI
+  const C = {
+    rst: "\x1b[0m", red: "\x1b[31m", grn: "\x1b[32m",
+    ylw: "\x1b[33m", cyn: "\x1b[36m", dim: "\x1b[2m",
+  };
+  function log(tag, msg, color = C.cyn) {
+    console.log(`${color}[${ts()}] [${tag}]${C.rst} ${msg}`);
+  }
+
   function ts() { return new Date().toLocaleTimeString("pl-PL"); }
   const url = useOpenRouter
     ? "https://openrouter.ai/api/v1/chat/completions"
@@ -61,8 +70,33 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
   const headers = { "Content-Type": "application/json" };
   if (useOpenRouter) headers["Authorization"] = `Bearer ${process.env.OPENROUTER_KEY}`;
 
-  console.log(`[${ts()}] [INFO]  Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"} | Model: ${model}`);
-  console.log(`[${ts()}] [INFO]  Wysyłam zapytanie...`);
+  log("INFO", `Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"} | Model: ${model}`);
+
+  // warmup – ładuje model do pamięci przed właściwym generowaniem
+  if (!useOpenRouter) {
+    log("OLLAMA", `Ładuję model ${model}... (to może potrwać)`, C.ylw);
+    try {
+      const wup = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "OK" }],
+          max_tokens: 1,
+          stream: false,
+          ...(useOpenRouter ? {} : { think: false }),
+        }),
+      });
+      if (!wup.ok) { log("ERR", `Warmup: ${wup.status}`, C.red); process.exit(1); }
+      const wj = await wup.json();
+      log("OLLAMA", `Model gotowy (${wj.usage?.total_tokens || "?"} tokenów)`, C.grn);
+    } catch (e) {
+      log("ERR", `Warmup failed: ${e.cause?.message || e.message}`, C.red);
+      process.exit(1);
+    }
+  }
+
+  log("INFO", `Generuję artykuł: "${topic.slice(0, 50)}..."`);
 
   const ac = new AbortController();
   let prompted = false;
@@ -73,22 +107,21 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
       const elapsed = ((Date.now() - start) / 1000).toFixed(0);
       if (!prompted && elapsed >= 120) {
         prompted = true;
-        const answer = await ask(`\n[${ts()}] [WAIT]  Generowanie trwa już ${elapsed}s.\n        Naciśnij Enter aby czekać, lub wpisz "q" i Enter aby przerwać: `);
+        const answer = await ask(`\n${C.ylw}[${ts()}] [WAIT]${C.rst}  Generowanie trwa już ${elapsed}s.\n        Naciśnij Enter aby czekać, lub wpisz "q" i Enter aby przerwać: `);
         if (answer.trim().toLowerCase() === "q") {
           ac.abort();
-          console.log(`[${ts()}] [INFO]  Przerwano przez użytkownika`);
+          log("INFO", "Przerwano przez użytkownika");
           process.exit(0);
         }
-        console.log(`[${ts()}] [INFO]  Kontynuuję...\n`);
+        log("INFO", "Kontynuuję...\n");
       } else {
-        console.log(`[${ts()}] [INFO]  Generowanie trwa... (${elapsed}s)`);
+        log("INFO", `Generowanie trwa... (${elapsed}s)`);
       }
     }
   })();
 
-  let res;
   try {
-    res = await fetch(url, {
+    const res = await fetch(url, {
       method: "POST",
       headers,
       signal: ac.signal,
@@ -100,33 +133,29 @@ body: pełny HTML z <h2>, <h3>, <p>, <ul>, <li>, <strong>. Minimum 1000 słów. 
         ...(useOpenRouter ? {} : { think: false }),
       }),
     });
-  } catch (e) {
-    if (e.name === "AbortError") {
-      console.log(`[${ts()}] [INFO]  Przerwano przez użytkownika`);
-    } else {
-      console.log(`[${ts()}] [ERR]  Błąd połączenia: ${e.cause?.message || e.message}`);
-    }
-    process.exit(1);
-  } finally {
     ac.abort();
-  }
 
-  if (!res.ok) {
-    const err = await res.text();
-    console.log(`[${ts()}] [ERR]  Błąd ${res.status}: ${err.slice(0, 200)}`);
+    if (!res.ok) {
+      const err = await res.text();
+      log("ERR", `Błąd ${res.status}: ${err.slice(0, 200)}`, C.red);
+      process.exit(1);
+    }
+
+    const raw = (await res.json()).choices[0].message.content;
+    log("OK", `Odpowiedź: ${raw.length} znaków`, C.grn);
+  } catch (e) {
+    if (e.name === "AbortError") { log("INFO", "Przerwano przez użytkownika"); }
+    else { log("ERR", `Błąd: ${e.cause?.message || e.message}`, C.red); }
     process.exit(1);
   }
-
-  const raw = (await res.json()).choices[0].message.content;
-  console.log(`[${ts()}] [OK]   Odpowiedź: ${raw.length} znaków`);
 
   let data;
   try {
     data = JSON.parse(raw.replace(/^[^{]*/, "").replace(/[^}]*$/, ""));
-    console.log(`[${ts()}] [OK]   JSON sparowany: title="${data?.title?.slice(0, 60)}..."`);
+    log("OK", `JSON sparowany: title="${data?.title?.slice(0, 60)}..."`, C.grn);
   } catch {
     data = null;
-    console.log(`[${ts()}] [WARN] JSON niepoprawny, używam surowej odpowiedzi`);
+    log("WARN", "JSON niepoprawny, używam surowej odpowiedzi", C.ylw);
   }
 
   const title = data?.title || topic;
@@ -171,9 +200,9 @@ a{color:#0366d6}
 
   writeFileSync(fname, html, "utf8");
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`[${ts()}] [OK]   Zapisano -> ${fname}`);
-  console.log(`[${ts()}] [DONE] Czas: ${elapsed}s | Rozmiar: ${body.length} znaków`);
-  console.log(`\n🔗 https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}\n`);
+  log("OK", `Zapisano -> ${fname}`, C.grn);
+  log("DONE", `Czas: ${elapsed}s | Rozmiar: ${body.length} znaków`, C.grn);
+  console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}\n`);
   rl.close();
 }
 main();
