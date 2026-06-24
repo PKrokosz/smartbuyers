@@ -1,8 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
-import { execSync } from "child_process";
 import Parser from "rss-parser";
-import { C, esc, safeHref, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, FORMATS, PERSONAS, TONES, LANGS, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, buildPrompt, validate, streamResponse, slugify, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed, pingGoogle } from "./lib/shared.mjs";
+import { C, ts, stepReset, step, log, loadGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
 
 const FEEDS_FILE = "feeds.json";
 const MODEL = "qwen2.5:1.5b";
@@ -11,11 +10,10 @@ const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
 const flagReview = process.argv.includes("--review");
 const flagDigest = process.argv.includes("--digest");
 
-const fv = (flag, dict, def) => { const i = process.argv.indexOf(flag); if (i >= 0 && i + 1 < process.argv.length && dict[process.argv[i + 1]]) return process.argv[i + 1]; return def; };
-const optFormat  = flagDigest ? "digest" : fv("--format", FORMATS, DEF_FORMAT);
-const optPersona = fv("--persona", PERSONAS, DEF_PERSONA);
-const optTone    = fv("--tone", TONES, DEF_TONE);
-const optLang    = fv("--lang", LANGS, DEF_LANG);
+const optFormat  = flagDigest ? "digest" : parseFlag(process.argv, "--format", FORMATS, DEF_FORMAT);
+const optPersona = parseFlag(process.argv, "--persona", PERSONAS, DEF_PERSONA);
+const optTone    = parseFlag(process.argv, "--tone", TONES, DEF_TONE);
+const optLang    = parseFlag(process.argv, "--lang", LANGS, DEF_LANG);
 
 // --- generate single ---
 async function generate(itemTitle, snippet, attempt = 0) {
@@ -32,7 +30,7 @@ async function generate(itemTitle, snippet, attempt = 0) {
   if (!data) { console.log(`    ${C.ylw}→ JSON fail${C.rst}`); return { data: null, raw }; }
   console.log(`    → title: "${(data.title || "").slice(0, 50)}" | body: ${(data.body || "").length} zn`);
   const v = validate(data, raw, LANGS[optLang].minWords);
-  console.log(`    → Słowa: ${v.words} | H2: ${v.hasH2 ? "✅" : "❌"}`);
+  console.log(`    → Słowa: ${v.words} | H2: ${v.hasH2 ? "✅" : "❌"} | Czyt: ${v.readability}`);
   if (!v.ok && attempt < 1) { console.log(`    ${C.ylw}→ ${v.issues.join(", ")} — retry${C.rst}`); return generate(itemTitle, snippet, attempt + 1); }
   return { data, raw, valid: v.ok, issues: v.issues };
 }

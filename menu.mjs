@@ -35,7 +35,7 @@ async function main() {
     const dopush = (await ask("  Push na git po zapisie? [t/n, Enter=t]: ")).trim().toLowerCase();
     run("generate.mjs", "--rss", rssUrl, ...(dopush !== "n" ? ["--push"] : []));
   } else if (pick === 3) {
-    if (!existsSync("feeds.json") && !existsSync("rss-watch.mjs")) {
+    if (!existsSync("feeds.json")) {
       console.log("  Najpierw uruchom opcję 2 żeby skonfigurować feedy.");
       rl.close(); return;
     }

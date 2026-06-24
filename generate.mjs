@@ -1,9 +1,8 @@
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
 import { createInterface } from "readline";
-import { execSync } from "child_process";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
-import { C, esc, ts, stepReset, step, loadGen, isGen, markGen, ollamaModels, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed, pingGoogle } from "./lib/shared.mjs";
+import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
@@ -40,7 +39,7 @@ async function generate(model, systemPrompt, userContent, minWords = 200, attemp
   }
   console.log(`  → title: "${(data.title||"").slice(0, 60)}" | body: ${(data.body||"").length} znaków`);
   const v = validate(data, raw, minWords);
-  console.log(`  → Słowa: ${v.words} | H2: ${v.hasH2?"✅":"❌"} | Desc: ${(data.desc||"").length} znaków`);
+  console.log(`  → Słowa: ${v.words} | H2: ${v.hasH2?"✅":"❌"} | Czyt: ${v.readability} | Desc: ${(data.desc||"").length} znaków`);
   if (!v.ok && attempt < 1) { console.log(`  ${C.ylw}→ ${v.issues.join(", ")} – retry${C.rst}`); return generate(model, systemPrompt, userContent, minWords, attempt + 1); }
   return { data, raw, valid: v.ok, issues: v.issues };
 }
@@ -60,11 +59,10 @@ async function main() {
   if (ri >= 0 && ri + 1 < raw.length) rssUrl = raw[ri + 1];
 
   // content flags
-  const fv = (flag, dict, def) => { const i = raw.indexOf(flag); if (i >= 0 && i + 1 < raw.length && dict[raw[i + 1]]) return raw[i + 1]; return def; };
-  const optFormat  = fv("--format",  FORMATS,  DEF_FORMAT);
-  const optPersona = fv("--persona", PERSONAS, DEF_PERSONA);
-  const optTone    = fv("--tone",    TONES,    DEF_TONE);
-  const optLang    = fv("--lang",    LANGS,    DEF_LANG);
+  const optFormat  = parseFlag(raw, "--format",  FORMATS,  DEF_FORMAT);
+  const optPersona = parseFlag(raw, "--persona", PERSONAS, DEF_PERSONA);
+  const optTone    = parseFlag(raw, "--tone",    TONES,    DEF_TONE);
+  const optLang    = parseFlag(raw, "--lang",    LANGS,    DEF_LANG);
 
   const skip = new Set(["--push", "--verbose", "-v", "--rss", "--format", "--persona", "--tone", "--lang"]);
   const positional = [];
@@ -221,9 +219,6 @@ async function main() {
     step("Git push", C.ylw);
     const files = rssSourceLink ? "articles/ generated.json" : "articles/";
     gitPush(files, `Add: ${artTitle.slice(0, 60)}`);
-    // Google Indexing ping (if key set)
-    const pageUrl = `https://pkrokosz.github.io/smartbuyers/articles/${slug}.html`;
-    try { await pingGoogle(pageUrl); } catch {}
   }
 
   // Done

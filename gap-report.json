@@ -1,0 +1,83 @@
+{
+  "date": "2026-06-24T14:03:45.361Z",
+  "articles": 3,
+  "topKeywords": [
+    {
+      "keyword": "anthropic",
+      "count": 1
+    },
+    {
+      "keyword": "claude",
+      "count": 1
+    },
+    {
+      "keyword": "szybki",
+      "count": 1
+    },
+    {
+      "keyword": "zdecydowany",
+      "count": 1
+    },
+    {
+      "keyword": "przys",
+      "count": 1
+    },
+    {
+      "keyword": "ogiciel",
+      "count": 1
+    },
+    {
+      "keyword": "amazon",
+      "count": 1
+    },
+    {
+      "keyword": "testuje",
+      "count": 1
+    },
+    {
+      "keyword": "wersj",
+      "count": 1
+    },
+    {
+      "keyword": "alexa",
+      "count": 1
+    },
+    {
+      "keyword": "hindi",
+      "count": 1
+    },
+    {
+      "keyword": "indiach",
+      "count": 1
+    },
+    {
+      "keyword": "google",
+      "count": 1
+    },
+    {
+      "keyword": "deepmind",
+      "count": 1
+    },
+    {
+      "keyword": "stworz",
+      "count": 1
+    }
+  ],
+  "topics": [
+    {
+      "slug": "google-deepmind-i-a24-stworz-narz-dzia-ai-w-filmowym-stylu",
+      "date": "2026-06-24T13:18:17.380Z",
+      "keywords": "google, deepmind, stworz, narz, dzia, filmowym, stylu"
+    },
+    {
+      "slug": "amazon-testuje-now-wersj-alexa-z-pod-hindi-w-indiach",
+      "date": "2026-06-24T13:01:32.366Z",
+      "keywords": "amazon, testuje, wersj, alexa, hindi, indiach"
+    },
+    {
+      "slug": "anthropic-s-claude-tag-szybki-i-zdecydowany-przys-ogiciel-dl",
+      "date": "2026-06-24T12:47:33.481Z",
+      "keywords": "anthropic, claude, szybki, zdecydowany, przys, ogiciel"
+    }
+  ]
+}

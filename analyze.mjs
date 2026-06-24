@@ -1,7 +1,5 @@
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { writeFileSync } from "fs";
 import { loadGen, C } from "./lib/shared.mjs";
-
-function ts() { return new Date().toLocaleTimeString("pl-PL"); }
 
 async function main() {
   console.log(`${C.cyn}╔══════════════════════════════════════════╗${C.rst}`);
