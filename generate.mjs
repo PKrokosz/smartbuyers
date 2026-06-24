@@ -3,14 +3,14 @@ import { createInterface } from "readline";
 import { execSync } from "child_process";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
-import { C, esc, ts, stepReset, step, loadGen, isGen, markGen, ollamaModels, S_RSS, S_TOPIC, promptRss, promptTopic, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap } from "./lib/shared.mjs";
+import { C, esc, ts, stepReset, step, loadGen, isGen, markGen, ollamaModels, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, generateIndex, generateSitemap } from "./lib/shared.mjs";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
 function cleanup() { try { rl.close(); } catch {} }
 
 // --- generation ---
-async function generate(model, systemPrompt, userContent, attempt = 0) {
+async function generate(model, systemPrompt, userContent, minWords = 200, attempt = 0) {
   const isOllama = !process.env.OPENROUTER_KEY;
   const url = isOllama
     ? "http://localhost:11434/v1/chat/completions"
@@ -39,9 +39,9 @@ async function generate(model, systemPrompt, userContent, attempt = 0) {
     return { data: null, raw, valid: false, issues: ["JSON parse failed"] };
   }
   console.log(`  → title: "${(data.title||"").slice(0, 60)}" | body: ${(data.body||"").length} znaków`);
-  const v = validate(data, raw);
+  const v = validate(data, raw, minWords);
   console.log(`  → Słowa: ${v.words} | H2: ${v.hasH2?"✅":"❌"} | Desc: ${(data.desc||"").length} znaków`);
-  if (!v.ok && attempt < 1) { console.log(`  ${C.ylw}→ ${v.issues.join(", ")} – retry${C.rst}`); return generate(model, systemPrompt, userContent, attempt + 1); }
+  if (!v.ok && attempt < 1) { console.log(`  ${C.ylw}→ ${v.issues.join(", ")} – retry${C.rst}`); return generate(model, systemPrompt, userContent, minWords, attempt + 1); }
   return { data, raw, valid: v.ok, issues: v.issues };
 }
 
@@ -58,19 +58,32 @@ async function main() {
   let rssUrl = null;
   const ri = raw.indexOf("--rss");
   if (ri >= 0 && ri + 1 < raw.length) rssUrl = raw[ri + 1];
-  const skip = new Set(["--push", "--verbose", "-v", "--rss"]);
+
+  // content flags
+  const fv = (flag, dict, def) => { const i = raw.indexOf(flag); if (i >= 0 && i + 1 < raw.length && dict[raw[i + 1]]) return raw[i + 1]; return def; };
+  const optFormat  = fv("--format",  FORMATS,  DEF_FORMAT);
+  const optPersona = fv("--persona", PERSONAS, DEF_PERSONA);
+  const optTone    = fv("--tone",    TONES,    DEF_TONE);
+  const optLang    = fv("--lang",    LANGS,    DEF_LANG);
+
+  const skip = new Set(["--push", "--verbose", "-v", "--rss", "--format", "--persona", "--tone", "--lang"]);
   const positional = [];
   for (let i = 0; i < raw.length; i++) {
-    if (skip.has(raw[i])) { if (raw[i] === "--rss") i++; continue; }
+    if (skip.has(raw[i])) { if (raw[i] === "--rss" || raw[i] === "--format" || raw[i] === "--persona" || raw[i] === "--tone" || raw[i] === "--lang") i++; continue; }
     positional.push(raw[i]);
   }
 
   stepReset(rssUrl ? (flagPush ? 12 : 11) : (flagPush ? 11 : 10));
 
-  console.log("╔══════════════════════════════════════╗");
-  console.log(`║     Generator v3${rssUrl ? " (RSS)" : ""}${flagPush ? " +push" : ""}              ║`);
-  console.log(`║     Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"}                   ║`);
-  console.log("╚══════════════════════════════════════╝\n");
+  const fmtShort = FORMATS[optFormat].label;
+  const personaShort = PERSONAS[optPersona].label;
+  const toneShort = TONES[optTone].label;
+  const langShort = LANGS[optLang].label;
+
+  console.log("╔══════════════════════════════════════════╗");
+  console.log(`║     Generator v3${rssUrl ? " RSS" : ""} · ${fmtShort} · ${personaShort} · ${toneShort} · ${langShort}  ║`);
+  console.log(`║     Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"}                         ║`);
+  console.log("╚══════════════════════════════════════════╝\n");
 
   let topic, userContent, systemPrompt, rssSourceLink, rssSourceLabel;
 
@@ -108,8 +121,9 @@ async function main() {
     console.log(`  → Treść: ${cSnippet.length} znaków | Link: ${cLink || "brak"}`);
 
     topic = cTitle;
-    userContent = promptRss(cTitle, cSnippet);
-    systemPrompt = S_RSS;
+    const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, rssTitle: cTitle, rssSnippet: cSnippet });
+    userContent = bp.user;
+    systemPrompt = bp.system;
     rssSourceLink = cLink;
     rssSourceLabel = cTitle;
   } else {
@@ -117,8 +131,9 @@ async function main() {
     if (!topic) topic = (await ask("  Temat artykułu: ")).trim();
     if (!topic) { topic = "Czym jest dropshipping B2B"; console.log(`  → Domyślny: "${topic}"`); }
     else console.log(`  → "${topic}" (${topic.length} znaków)`);
-    userContent = promptTopic(topic);
-    systemPrompt = S_TOPIC;
+    const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, topic });
+    userContent = bp.user;
+    systemPrompt = bp.system;
   }
 
   // [2] Model
@@ -168,7 +183,7 @@ async function main() {
   let completed = false;
   const statusLoop = (async () => { while (!completed) { await setTimeout(30000); if (completed) break; console.log(`\n  ${C.dim}[⏱ ${((Date.now()-genStart)/1000).toFixed(0)}s] Wciąż generuję...${C.rst}`); } })();
   let result;
-  try { result = await generate(model, systemPrompt, userContent); }
+  try { result = await generate(model, systemPrompt, userContent, LANGS[optLang].minWords); }
   catch (e) { completed = true; console.log(`  ${C.red}→ ${e.message}${C.rst}`); cleanup(); process.exit(1); }
   completed = true;
 
