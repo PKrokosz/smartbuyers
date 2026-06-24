@@ -2,6 +2,37 @@
   {
     "name": "TechCrunch AI",
     "url": "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "filter": null,
     "lastGuid": "https://techcrunch.com/?p=3135480"
+  },
+  {
+    "name": "Google News: dropshipping PL",
+    "url": "https://news.google.com/rss/search?q=dropshipping+polska&hl=pl&gl=PL&ceid=PL:pl",
+    "filter": null,
+    "lastGuid": null
+  },
+  {
+    "name": "Google News: e-commerce EN",
+    "url": "https://news.google.com/rss/search?q=e-commerce+trends+2026&hl=en&gl=US&ceid=US:en",
+    "filter": null,
+    "lastGuid": null
+  },
+  {
+    "name": "Reddit r/dropshipping",
+    "url": "https://www.reddit.com/r/dropshipping/.rss",
+    "filter": null,
+    "lastGuid": null
+  },
+  {
+    "name": "Reddit r/ecommerce",
+    "url": "https://www.reddit.com/r/ecommerce/.rss",
+    "filter": null,
+    "lastGuid": null
+  },
+  {
+    "name": "Hacker News (AI + startups)",
+    "url": "https://hnrss.org/frontpage",
+    "filter": ["ai", "startup", "saas", "ecommerce", "e-commerce", "funding", "launch"],
+    "lastGuid": null
   }
 ]

@@ -125,11 +125,24 @@ node generate.mjs --rss https://techcrunch.com/category/ai/feed/ --format faq --
 | Flaga | Opis |
 |-------|------|
 | `--review` | Pyta przed każdym newsem: `[g]/[p]/[q]` |
+| `--digest` | Zbiera wiele newsów w jeden artykuł-przegląd |
 | `--verbose` / `-v` | Pełny prompt i surowa odpowiedź |
 | `--format X` | J.w. (8 typów) |
 | `--persona X` | J.w. (5 stylów) |
 | `--tone X` | J.w. (4 tony) |
 | `--lang X` | J.w. (`pl`, `en`) |
+
+### feeds.json — konfiguracja RSS
+
+```json
+[
+  { "name": "TechCrunch AI", "url": "...", "filter": null },
+  { "name": "Google News: dropshipping PL", "url": "...", "filter": null },
+  { "name": "Hacker News", "url": "...", "filter": ["ai", "startup", "saas", "ecommerce"] }
+]
+```
+
+Pole `filter` — lista słów kluczowych. Jeśli ustawione, tylko newsy zawierające którekolwiek słowo przechodzą dalej.
 
 ---
 
@@ -139,6 +152,6 @@ Zobacz [ROADMAP.md](ROADMAP.md) — 5 faz do jakości narzędzi klasy TRYSORO:
 
 1. ✅ Fundament (shared module, Schema.org, sitemap, index)
 2. ✅ Content diversity (8 formatów, 5 person, 4 tony, 2 języki)
-3. 🔜 RSS intelligence (10+ feedów, filtrowanie, digest mode)
+3. ✅ RSS intelligence (6 feedów, filtrowanie, digest mode)
 4. 📋 Content intelligence (internal linking, FAQ schema, gap analyzer)
 5. 📋 Dystrybucja (RSS feed bloga, social auto-post, newsletter)
