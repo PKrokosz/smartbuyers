@@ -1,4 +1,4 @@
-[🏠 Home](/) · [📰 Artykuły](/articles) · [📝 Blog](/blog) · [🛒 SelleeTools](#)
+[🏠 Home](/) · [📰 Artykuły](/articles) · [📝 Blog](/blog) · [🛒 SelleeTools](https://selleetools.com)
 
 ---
 

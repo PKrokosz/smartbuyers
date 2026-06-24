@@ -6,27 +6,32 @@
 <title>SmartBuyers – Artykuły</title>
 <style>
 *,*:before,*:after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1.5rem;line-height:1.7;color:#222;background:#fafafa}
-h1{font-size:2rem;margin-bottom:.5rem;border-bottom:3px solid #0366d6;padding-bottom:.5rem}
+body{font-family:system-ui,-apple-system,sans-serif;max-width:900px;margin:0 auto;padding:0 1.5rem 2rem;line-height:1.7;color:#222;background:#fafafa}
+.topnav{display:flex;gap:.5rem;padding:.9rem 0;margin-bottom:1.5rem;border-bottom:2px solid #159957;font-size:.92rem;flex-wrap:wrap}
+.topnav a{color:#159957;text-decoration:none;padding:.2rem .5rem;border-radius:4px}
+.topnav a:hover{background:#15995711}
+h1{font-size:2rem;margin-bottom:.5rem;padding-bottom:.5rem}
 h2{font-size:1.2rem;margin:0}
-h2 a{color:#0366d6;text-decoration:none}
+h2 a{color:#159957;text-decoration:none}
 h2 a:hover{text-decoration:underline}
 .item{padding:1.2rem 0;border-bottom:1px solid #e0e0e0}
 .item:last-child{border-bottom:none}
 .meta{font-size:.85rem;color:#777;margin-top:.3rem}
-.meta a{color:#0366d6}
+.meta a{color:#159957}
 .empty{text-align:center;padding:3rem;color:#999}
-.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem}
-.header a{color:#0366d6;text-decoration:none;font-size:.9rem}
-.count{font-size:.9rem;color:#777}
-.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid #eee;font-size:.8rem;color:#999;text-align:center}
+.count{font-size:.9rem;color:#777;margin-bottom:1rem}
+.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid #ddd;font-size:.8rem;color:#999;text-align:center}
+.footer a{color:#159957}
 </style>
 </head>
 <body>
-<div class="header">
-  <h1>📰 SmartBuyers</h1>
-  <a href="https://pkrokosz.github.io/smartbuyers">← strona główna</a>
-</div>
+<nav class="topnav">
+  <a href="https://pkrokosz.github.io/smartbuyers/">🏠 Home</a>
+  <a href="https://pkrokosz.github.io/smartbuyers/articles/">📰 Artykuły</a>
+  <a href="https://pkrokosz.github.io/smartbuyers/blog/">📝 Blog</a>
+  <a href="https://selleetools.com">🛒 SelleeTools</a>
+</nav>
+<h1>📰 SmartBuyers</h1>
 <div class="count">4 artykułów</div>
 
     <article class="item">
