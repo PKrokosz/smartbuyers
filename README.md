@@ -2,7 +2,7 @@
 
 Karta wiedzy o platformie [SelleeTools](https://selleetools.com) — wielokanałowej platformie B2B do dropshippingu, łączącej dostawców (Vendorów) ze sprzedawcami (Resellerami).
 
-Strona publikowana na GitHub Pages: [https://twoja-nazwa.github.io/smartbuyers](https://twoja-nazwa.github.io/smartbuyers)
+Strona publikowana na GitHub Pages: [https://pkrokosz.github.io/smartbuyers/](https://pkrokosz.github.io/smartbuyers/)
 
 ## Struktura
 
