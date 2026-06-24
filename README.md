@@ -11,8 +11,9 @@ smartbuyers/
 ├── _config.yml          # Konfiguracja GitHub Pages (motyw Cayman)
 ├── _posts/              # Posty Jekyll (markdown, data w nazwie)
 ├── articles/            # Wygenerowane artykuły HTML (autonomiczne strony)
-├── generate.mjs         # Generator artykułów SEO przez AI (interaktywny)
-├── rss-watch.mjs        # Automat: RSS → AI → HTML → git push
+├── menu.mjs             # 🔷 Punkt startowy — jedno menu, wszystkie opcje
+├── generate.mjs         # Generator artykułów SEO (temat własny lub --rss)
+├── rss-watch.mjs        # Automat RSS → AI → push (auto lub --review)
 ├── feeds.json           # Konfiguracja RSS feedów
 ├── package.json         # Zależności Node (rss-parser)
 ├── index.md             # Główna strona (karta wiedzy SelleeTools)
@@ -20,7 +21,18 @@ smartbuyers/
 └── README.md            # Ten plik
 ```
 
-## Generator artykułów (`generate.mjs`)
+## Szybki start
+
+```
+node menu.mjs
+```
+
+Jedno menu daje dostęp do wszystkich funkcji:
+
+1. **Generuj z tematu** — wpisujesz własny temat, wybierasz model, generujesz
+2. **Generuj z RSS** — wybierasz feed RSS, picker newsów, generujesz + opcjonalny push
+3. **Auto-watch RSS** — automat: sprawdza feed co 30min (Task Scheduler), nowe newsy → generuj → push
+4. **Review RSS** — przeglądasz każdy nowy news, decydujesz [g]eneruj / [p]omiń / [q]wyjdź
 
 Interaktywny skrypt Node.js, który generuje artykuły SEO przez lokalną Ollamę (lub OpenRouter) i zapisuje jako HTML do `articles/`.
 
