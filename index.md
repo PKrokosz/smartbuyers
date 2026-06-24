@@ -1,16 +1,22 @@
-[Blog →](/blog) · [Karta wiedzy SelleeTools](#)
+[🏠 Home](/) · [📰 Artykuły](/articles) · [📝 Blog](/blog) · [🛒 SelleeTools](#)
 
 ---
 
-# Karta wiedzy — SelleeTools
+# SmartBuyers — B2B Dropshipping Intelligence
 
-**Multi-channel B2B platforma do dropshippingu** — łączymy sprawdzonych dostawców (Vendorów) z topowymi sprzedawcami (Resellerami) na globalnych marketplace'ach.
+**AI-powered content hub.** Automatycznie generowane artykuły SEO z RSS feedów (TechCrunch AI, Google News, Reddit). Newsy z branży e-commerce i AI tłumaczone na polski, analizowane i publikowane codziennie.
 
 > Platforma V2R (Vendor to Reseller) — część **Grupy Smartbuyers**.
 
 ---
 
-## O platformie
+## 📰 Najnowsze artykuły
+
+Zobacz pełną listę: [**articles/** →](/articles)
+
+---
+
+## O platformie SelleeTools
 
 SelleeTools to narzędzie dla e-commerce, które umożliwia:
 
