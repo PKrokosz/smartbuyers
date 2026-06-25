@@ -1,9 +1,12 @@
 import { createServer, request } from "http";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { spawn, execSync } from "child_process";
+import { spawn, exec, execSync } from "child_process";
 import { randomBytes } from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
+import RssParser from "rss-parser";
+
+const rssParser = new RssParser();
 
 const PORT = 3000;
 const DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +38,21 @@ function json(res, data, status = 200) {
 function readJSON(p) {
   try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; }
 }
+
+const TOPICS_PATH = path.join(ROOT, "topic-queue.json");
+let topics = readJSON(TOPICS_PATH);
+if (!Array.isArray(topics)) topics = [];
+function saveTopics() { writeFileSync(TOPICS_PATH, JSON.stringify(topics, null, 2)); }
+
+const RESEARCH_PATH = path.join(ROOT, "research-results.json");
+let researchLog = readJSON(RESEARCH_PATH);
+if (!Array.isArray(researchLog)) researchLog = [];
+function saveResearch() { writeFileSync(RESEARCH_PATH, JSON.stringify(researchLog, null, 2)); }
+
+const SOURCES_DB_PATH = path.join(ROOT, "research-sources.json");
+let sourcesDb = readJSON(SOURCES_DB_PATH);
+if (!Array.isArray(sourcesDb)) sourcesDb = [];
+function saveSourcesDb() { writeFileSync(SOURCES_DB_PATH, JSON.stringify(sourcesDb, null, 2)); }
 
 function spawnRun(run) {
   let body = {};
@@ -110,12 +128,64 @@ function spawnRun(run) {
   });
 }
 
+const NB_RUNNER = path.join(ROOT, "engines", "nb_runner.py");
+const NB_PY = "python";
+
+function spawnNbRun(run) {
+  let body = {};
+  try { if (run.body) body = JSON.parse(run.body); } catch {}
+  const nbAction = body.action || "list";
+  const nbArgs = body.args || [];
+  const cmd = `"${NB_PY}" "${NB_RUNNER}" ${nbAction} ${nbArgs.map(a => `"${String(a).replace(/"/g,'\\"')}"`).join(" ")}`;
+  const child = exec(cmd, { cwd: ROOT, maxBuffer: 10 * 1024 * 1024 });
+  run.proc = child;
+  run.buf = "";
+  function emit(type, data) {
+    run.buf += data;
+    if (run.res) sendSSE(run.res, { type, data, full: run.buf });
+  }
+  child.stdout.on("data", d => emit("stdout", d.toString()));
+  child.stderr.on("data", d => emit("stderr", d.toString()));
+  child.on("exit", code => {
+    emit("exit", String(code));
+    const ok = code === 0;
+    const doneMsg = { done: true, success: ok, error: ok ? null : "exit code " + code, output: run.buf };
+    if (run.res) sendSSE(run.res, doneMsg);
+    run.done = doneMsg;
+    setTimeout(() => runs.delete(run.id), 60000);
+  });
+  child.on("error", e => {
+    const errMsg = { done: true, success: false, error: e.message, output: run.buf };
+    if (run.res) sendSSE(run.res, { type: "error", data: e.message });
+    if (run.res) sendSSE(run.res, errMsg);
+    run.done = errMsg;
+  });
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const p = url.pathname;
   const m = req.method;
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (m === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+  // ── NotebookLM exec (moved before all handlers to avoid ReferenceError) ──
+  const NB = path.join(ROOT, "engines", "nb_runner.py");
+  const PY = "python";
+  function nbExec(...args) {
+    let timeout = 30000;
+    if (args[0] === "generate-report" || args[0] === "add-research") timeout = 300000;
+    else if (args[0] === "generate-audio") timeout = 600000;
+    else if (args[0] === "ask") timeout = 180000;
+    try {
+      const out = execSync(`"${PY}" "${NB}" ${args.map(a => `"${String(a).replace(/"/g,'\\"')}"`).join(" ")}`, { encoding: "utf8", timeout, cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+      return JSON.parse(out.trim());
+    } catch (e) {
+      let msg = e.message;
+      try { if (e.stderr) { const j = JSON.parse(e.stderr.trim()); msg = j.error || msg; } } catch {}
+      throw new Error(msg);
+    }
+  }
 
   // SSE stream endpoint
   if (m === "GET" && p.startsWith("/api/run/") && p.endsWith("/stream")) {
@@ -145,8 +215,44 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // POST /api/run/nb — stream NotebookLM CLI output with live progress
+  if (m === "POST" && p === "/api/run/nb") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        if (!b.action) { json(res, { error: "missing action" }, 400); return; }
+        const runId = uid();
+        const run = { id: runId, action: "nb-run", res: null, buf: "", body };
+        runs.set(runId, run);
+        json(res, { ok: true, runId }, 202);
+        spawnNbRun(run);
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // POST /api/run/nb-newsletter-report
+  if (m === "POST" && p === "/api/run/nb-newsletter-report") {
+    try {
+      const result = nbExec("generate-report", "5dd3bcd8-fc51-481e-bffa-fab231a378c3", "--format", "briefing-doc");
+      json(res, { ok: true, output: JSON.stringify(result, null, 2) });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/run/nb-newsletter-audio
+  if (m === "POST" && p === "/api/run/nb-newsletter-audio") {
+    try {
+      const result = nbExec("generate-audio", "992ecd72-5758-4a43-9b8e-cfaf7bf0bd72", "--format", "deep-dive");
+      json(res, { ok: true, output: JSON.stringify(result, null, 2) });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
   // POST /api/run/:action
-  if (m === "POST" && /^\/api\/run\/[a-z][a-z-]+$/.test(p)) {
+  if (m === "POST" && p !== "/api/run/nb" && /^\/api\/run\/[a-z][a-z-]+$/.test(p)) {
     const action = p.replace("/api/run/", "");
     const VALID = ["generate","rss","auto-watch","review","analyze","newsletter","social"];
     if (!VALID.includes(action)) { json(res, { ok: false, error: "unknown action" }, 400); return; }
@@ -204,30 +310,15 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // ── NotebookLM API ──────────────────────────────────────────────
-  const NB = path.join(ROOT, "engines", "nb_runner.py");
-  const PY = "python";
-  function nbExec(...args) {
-    let timeout = 30000;
-    if (args[0] === "generate-report" || args[0] === "add-research") timeout = 300000;
-    else if (args[0] === "generate-audio") timeout = 600000;
-    else if (args[0] === "ask") timeout = 180000;
-    const out = execSync(`"${PY}" "${NB}" ${args.map(a => `"${String(a).replace(/"/g,'\\"')}"`).join(" ")}`, { encoding: "utf8", timeout, cwd: ROOT });
-    return JSON.parse(out.trim());
-  }
-
-  // GET /api/nb/auth-status — uses real API call to validate session, not just cookie file check
+  // GET /api/nb/auth-status — uses doctor to validate real session, not cached list
   if (m === "GET" && p === "/api/nb/auth-status") {
     try {
-      const r = nbExec("list");
-      json(res, { auth: true, notebooks: Array.isArray(r) ? r.length : (r.notebooks || []).length });
+      const diag = nbExec("doctor");
+      const listR = nbExec("list");
+      const nbs = Array.isArray(listR) ? listR : (listR.notebooks || []);
+      json(res, { auth: true, notebooks: nbs.length, detail: diag });
     } catch (e) {
-      try {
-        const diag = nbExec("doctor");
-        json(res, { auth: false, error: "Sesja wygasła — kliknij Zaloguj", detail: diag });
-      } catch {
-        json(res, { auth: false, error: e.message }, 503);
-      }
+      json(res, { auth: false, error: e.message || "Sesja wygasła" }, 503);
     }
     return;
   }
@@ -262,57 +353,70 @@ const server = createServer((req, res) => {
 
   // POST /api/nb/create
   if (m === "POST" && p === "/api/nb/create") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         json(res, nbExec("create", b.name || "SmartBuyers Notebook"));
-      });
-    } catch (e) { json(res, { error: e.message }, 400); }
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // POST /api/nb/init-context — returns systemprompt.md content for prepending to queries
+  if (m === "POST" && p === "/api/nb/init-context") {
+    try {
+      const spFile = path.join(ROOT, "systemprompt.md");
+      if (!existsSync(spFile)) { json(res, { error: "not found" }, 404); return; }
+      const content = readFileSync(spFile, "utf8");
+      const maxLen = 4000;
+      const trimmed = content.length > maxLen ? content.slice(0, maxLen) : content;
+      json(res, { ok: true, content: trimmed });
+    } catch (e) { json(res, { error: e.message }, 500); }
     return;
   }
 
   // POST /api/nb/add-research
   if (m === "POST" && p === "/api/nb/add-research") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         const mode = b.mode || "fast";
         const result = nbExec("add-research", b.notebookId, b.query, "--mode", mode);
         json(res, result);
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
   // POST /api/nb/generate-report
   if (m === "POST" && p === "/api/nb/generate-report") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         const result = nbExec("generate-report", b.notebookId, "--format", b.format || "briefing-doc");
         json(res, result);
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
   // POST /api/nb/generate-audio
   if (m === "POST" && p === "/api/nb/generate-audio") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         const result = nbExec("generate-audio", b.notebookId, "--format", b.format || "deep-dive");
         json(res, result);
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
@@ -354,41 +458,41 @@ const server = createServer((req, res) => {
 
   // POST /api/nb/source-add
   if (m === "POST" && p === "/api/nb/source-add") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         const type = b.type || "auto";
         json(res, nbExec("source-add", b.notebookId, b.content, "--type", type));
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
   // POST /api/nb/source-guide
   if (m === "POST" && p === "/api/nb/source-guide") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         json(res, nbExec("source-guide", b.notebookId, b.sourceId));
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
   // POST /api/nb/rename
   if (m === "POST" && p === "/api/nb/rename") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         json(res, nbExec("rename", b.notebookId, b.title));
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
@@ -403,14 +507,14 @@ const server = createServer((req, res) => {
 
   // POST /api/nb/ask
   if (m === "POST" && p === "/api/nb/ask") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         json(res, nbExec("ask", b.notebookId, b.question));
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
@@ -515,10 +619,10 @@ const server = createServer((req, res) => {
 
   // POST /api/nb/downloads
   if (m === "POST" && p === "/api/nb/downloads") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         const nbId = b.notebookId || "7a31df6c";
         const type = b.type || "all";
@@ -531,25 +635,25 @@ const server = createServer((req, res) => {
           created_at: a.created_at || "",
         })) : [];
         json(res, { total: items.length, items });
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
   // POST /api/nb/download
   if (m === "POST" && p === "/api/nb/download") {
-    try {
-      let body = "";
-      req.on("data", c => body += c);
-      req.on("end", () => {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
         const b = JSON.parse(body);
         const args = ["download", b.type || "report", "-n", b.notebookId];
         if (b.artifactId) args.push(b.artifactId);
         if (b.outputPath) args.push("--output", b.outputPath);
         const result = nbExec(...args);
         json(res, { ok: true, output: JSON.stringify(result, null, 2) });
-      });
-    } catch (e) { json(res, { error: e.message }, 500); }
+      } catch (e) { json(res, { error: e.message }, 500); }
+    });
     return;
   }
 
@@ -579,24 +683,6 @@ const server = createServer((req, res) => {
         json(res, { ok: true });
       } catch (e) { json(res, { error: e.message }, 400); }
     });
-    return;
-  }
-
-  // POST /api/run/nb-newsletter-report
-  if (m === "POST" && p === "/api/run/nb-newsletter-report") {
-    try {
-      const result = nbExec("generate-report", "5dd3bcd8", "--format", "briefing-doc");
-      json(res, { ok: true, output: JSON.stringify(result, null, 2) });
-    } catch (e) { json(res, { error: e.message }, 500); }
-    return;
-  }
-
-  // POST /api/run/nb-newsletter-audio
-  if (m === "POST" && p === "/api/run/nb-newsletter-audio") {
-    try {
-      const result = nbExec("generate-audio", "992ecd72", "--format", "deep-dive");
-      json(res, { ok: true, output: JSON.stringify(result, null, 2) });
-    } catch (e) { json(res, { error: e.message }, 500); }
     return;
   }
 
@@ -690,6 +776,179 @@ const server = createServer((req, res) => {
         })),
       });
     } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/feeds — list all RSS feeds
+  if (m === "GET" && p === "/api/feeds") {
+    try {
+      const feeds = readJSON(path.join(ROOT, "feeds.json")) || [];
+      json(res, { feeds });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/rss/parse?url=... — fetch RSS feed items without Ollama
+  if (m === "GET" && p === "/api/rss/parse") {
+    const feedUrl = url.searchParams.get("url");
+    if (!feedUrl) { json(res, { error: "missing url" }, 400); return; }
+    (async () => {
+      try {
+        const feed = await rssParser.parseURL(feedUrl);
+        const items = (feed.items || []).map(item => ({
+          title: item.title || "",
+          link: item.link || "",
+          pubDate: item.pubDate || item.isoDate || "",
+          contentSnippet: (item.contentSnippet || item.content || "").slice(0, 300),
+          guid: item.guid || item.link || "",
+        }));
+        json(res, { feed: { title: feed.title || "", description: feed.description || "" }, items });
+      } catch (e) { json(res, { error: e.message }, 500); }
+    })();
+    return;
+  }
+
+  // Topic queue CRUD
+  if (m === "GET" && p === "/api/topics") {
+    json(res, { topics });
+    return;
+  }
+
+  if (m === "POST" && p === "/api/topics") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        if (!b.title) { json(res, { error: "missing title" }, 400); return; }
+        const topic = {
+          id: uid(), title: b.title, url: b.url || "", source: b.source || "",
+          guid: b.guid || "", date: new Date().toISOString(), status: "pending",
+        };
+        topics.push(topic);
+        saveTopics();
+        json(res, { ok: true, topic });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  if (m === "DELETE" && p.startsWith("/api/topics/")) {
+    const id = p.split("/")[3];
+    const idx = topics.findIndex(t => t.id === id);
+    if (idx === -1) { json(res, { error: "not found" }, 404); return; }
+    topics.splice(idx, 1);
+    saveTopics();
+    json(res, { ok: true });
+    return;
+  }
+
+  if (m === "PATCH" && p.startsWith("/api/topics/")) {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        const id = p.split("/")[3];
+        const t = topics.find(t => t.id === id);
+        if (!t) { json(res, { error: "not found" }, 404); return; }
+        if (b.status) t.status = b.status;
+        if (b.title) t.title = b.title;
+        saveTopics();
+        json(res, { ok: true, topic: t });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // Research sources DB — CRUD
+  if (m === "GET" && p === "/api/research-sources") {
+    const cat = url.searchParams.get("category");
+    const list = cat ? sourcesDb.filter(s => s.category === cat) : sourcesDb;
+    json(res, { sources: list, total: list.length, categories: [...new Set(sourcesDb.map(s => s.category).filter(Boolean))] });
+    return;
+  }
+
+  if (m === "POST" && p === "/api/research-sources") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        if (!b.url) { json(res, { error: "missing url" }, 400); return; }
+        // Deduplicate by URL
+        const exists = sourcesDb.find(s => s.url === b.url);
+        if (exists) { json(res, { ok: true, source: exists, deduped: true }); return; }
+        const src = {
+          id: uid(), url: b.url, title: b.title || "", researchQuery: b.researchQuery || "",
+          researchId: b.researchId || "", category: b.category || "general",
+          date: new Date().toISOString(), status: "new",
+        };
+        sourcesDb.push(src);
+        saveSourcesDb();
+        json(res, { ok: true, source: src });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  if (m === "PATCH" && p.startsWith("/api/research-sources/")) {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        const id = p.split("/")[3];
+        const s = sourcesDb.find(s => s.id === id);
+        if (!s) { json(res, { error: "not found" }, 404); return; }
+        if (b.status) s.status = b.status;
+        if (b.category) s.category = b.category;
+        saveSourcesDb();
+        json(res, { ok: true, source: s });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // Research results log — CRUD
+  if (m === "GET" && p === "/api/research-results") {
+    json(res, { results: researchLog });
+    return;
+  }
+
+  if (m === "POST" && p === "/api/research-results") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        if (!b.query) { json(res, { error: "missing query" }, 400); return; }
+        const entry = {
+          id: uid(), query: b.query, date: new Date().toISOString(),
+          output: b.output || "", category: b.category || "",
+        };
+        researchLog.unshift(entry);
+        if (researchLog.length > 50) researchLog.length = 50;
+        saveResearch();
+        // Auto-parse sources from research output JSON
+        let sourcesAdded = 0;
+        const cat = b.category || "general";
+        try {
+          const parsed = JSON.parse(b.output.trim());
+          const sources = parsed.sources || parsed.items || [];
+          sources.forEach(s => {
+            const url = s.url || s.link || "";
+            const title = s.title || s.name || url;
+            if (url && !sourcesDb.find(x => x.url === url)) {
+              sourcesDb.push({ id: uid(), url, title, researchQuery: b.query, researchId: entry.id, category: cat, date: new Date().toISOString(), status: "new" });
+              sourcesAdded++;
+            }
+          });
+          if (sourcesAdded) saveSourcesDb();
+        } catch {}
+        json(res, { ok: true, entry, sourcesAdded });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
     return;
   }
 

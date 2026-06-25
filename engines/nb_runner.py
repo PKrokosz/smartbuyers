@@ -69,7 +69,7 @@ async def cmd_source_guide(client, nb_id, source_id):
 
 
 async def cmd_add_research(client, nb_id, query, mode="fast"):
-    return _cli("source", "add-research", "-n", nb_id, query, "--mode", mode, "--import-all", "--json", timeout=300)
+    return _cli("source", "add-research", "-n", nb_id, query, "--mode", mode, "--json", timeout=300)
 
 
 async def cmd_generate_report(client, nb_id, fmt="briefing-doc", description=""):
@@ -88,6 +88,18 @@ async def cmd_generate_audio(client, nb_id, fmt="deep-dive", description=""):
 
 async def cmd_ask(client, nb_id, question):
     return _cli("ask", "-n", nb_id, question, "--json", timeout=180)
+
+
+async def cmd_init_context(client, nb_id):
+    """Read systemprompt.md and add it as a text source to a notebook."""
+    sp_path = Path(__file__).parent.parent / "systemprompt.md"
+    if not sp_path.exists():
+        return {"error": "systemprompt.md not found", "path": str(sp_path)}
+    content = sp_path.read_text("utf-8")
+    max_len = 4000
+    if len(content) > max_len:
+        content = content[:max_len] + "\n\n[... trimmed ...]"
+    return await cmd_source_add(client, nb_id, content, "text", "SmartBuyers System Prompt")
 
 
 async def cmd_source_add(client, nb_id, content, source_type="auto", title=""):
@@ -162,6 +174,7 @@ ACTIONS = {
     "sources": cmd_sources,
     "source-guide": cmd_source_guide,
     "source-add": cmd_source_add,
+    "init-context": cmd_init_context,
     "add-research": cmd_add_research,
     "generate-report": cmd_generate_report,
     "generate-audio": cmd_generate_audio,
@@ -215,6 +228,8 @@ def main():
             return await handler(None, args[0])
         elif action in ("notebook-summary", "sources", "metadata"):
             return await handler(None, args[0])
+        elif action == "init-context":
+            return await handler(None, args[0] if args else "")
         elif action == "source-guide":
             return await handler(None, args[0], args[1] if len(args) > 1 else kwargs.get("source_id", ""))
         elif action == "add-research":

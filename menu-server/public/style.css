@@ -161,6 +161,21 @@ body{min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;font-
   cursor:pointer;transition:border-color var(--transition),background var(--transition);
 }
 .job-item:hover{background:rgba(255,255,255,.06);border-color:var(--border-hover)}
+.feed-pick-item:hover{background:var(--bg-hover)}
+/* feed picker compact grid */
+.feed-picker-wrap{max-width:900px;margin:0 auto}
+.feed-group{margin-bottom:14px}
+.feed-group-head{font-size:.68rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;padding-left:2px}
+.feed-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.feed-chip{border:1px solid var(--border);border-radius:5px;padding:6px 9px;font-size:.7rem;font-weight:500;cursor:pointer;transition:all .12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed-chip:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.feed-chip-custom{border-style:dashed;text-align:center;color:var(--accent);font-weight:600;grid-column:1/-1}
+.feed-back-btn{display:block;margin:0 auto}
+@media (max-width:680px){.feed-grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:420px){.feed-grid{grid-template-columns:1fr}}
+.rss-item:hover{background:var(--bg-hover)}
+.topic-item:hover{background:var(--bg-hover)}
+.rss-add-btn:hover{border-color:var(--success) !important}
 .job-item .job-label{color:var(--text)}
 .job-item .job-status{color:var(--text-dim);font-size:.6rem}
 .job-item.running{border-color:var(--green)}

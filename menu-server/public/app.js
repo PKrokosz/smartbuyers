@@ -10,13 +10,20 @@
   const PERSONA_OPTS = { journalist:'Dziennikarz', marketer:'Marketer', technical:'Technical Writer', ceo:'CEO/Founder', customer:'Klient' };
   const TONE_OPTS = { casual:'Swobodny', formal:'Formalny', educational:'Edukacyjny', urgent:'Pilny' };
   const LANG_OPTS = { pl:'Polski', en:'English' };
+  const RESEARCH_CATEGORIES = {
+    ecommerce:    { icon:'🛒', label:'E-Commerce & Marketplace' },
+    'supply-chain':{ icon:'🚚', label:'Supply Chain & Logistyka' },
+    marketing:    { icon:'📢', label:'Marketing & AI' },
+    regulations:  { icon:'⚖️', label:'Regulacje EU' },
+    general:      { icon:'📊', label:'Ogólne' },
+  };
   const NB_NOTEBOOKS = {
-    sandbox: { id:'ab97b6a3', title:'Sandbox', icon:'🧪', desc:'Notebook testowy' },
-    news: { id:'5dd3bcd8', title:'News Digest', icon:'📰', desc:'Digest z kanałów RSS' },
-    research: { id:'7a31df6c', title:'Deep Research', icon:'🔬', desc:'Badania tematyczne' },
-    audio: { id:'992ecd72', title:'Audio Studio', icon:'🎙️', desc:'Podcasty i audio' },
-    sources: { id:'9ebb1726', title:'Sources', icon:'📚', desc:'Źródła i materiały' },
-    ads: { id:'7410e5aa', title:'Competition', icon:'🏁', desc:'Analiza konkurencji' },
+    sandbox: { id:'ab97b6a3-2d3f-4d90-a606-6e9f2d3417ec', title:'Sandbox', icon:'🧪', desc:'Notebook testowy' },
+    news: { id:'5dd3bcd8-fc51-481e-bffa-fab231a378c3', title:'News Digest', icon:'📰', desc:'Digest z kanałów RSS' },
+    research: { id:'7a31df6c-2516-4a0a-a0a6-34403d15f10a', title:'Deep Research', icon:'🔬', desc:'Badania tematyczne' },
+    audio: { id:'992ecd72-5758-4a43-9b8e-cfaf7bf0bd72', title:'Audio Studio', icon:'🎙️', desc:'Podcasty i audio' },
+    sources: { id:'9ebb1726-9322-423e-92f4-b081d65218b5', title:'Sources', icon:'📚', desc:'Źródła i materiały' },
+    ads: { id:'7410e5aa-7a83-4bc4-95d3-69bff35074f0', title:'Competition', icon:'🏁', desc:'Analiza konkurencji' },
   };
   const ACTION_LABELS = {
     'generate-prompt':'Generowanie prompta','generate-feed':'Generowanie feeda','generate-rss':'Generowanie z RSS',
@@ -97,6 +104,10 @@
     'nb-config': { title: 'NB Config', sub: 'Konfiguracja NotebookLM' },
     'git-status': { title: 'Git / Deploy', sub: 'Status repozytorium' },
     articles: { title: 'Artykuły', sub: 'Przegląd wygenerowanych artykułów' },
+    'rss-browse': { title: 'Przeglądaj RSS', sub: 'Wpisy z feeda' },
+    'rss-feed-picker': { title: 'Kanały RSS', sub: 'Wybierz feed do przeglądania' },
+    'research-history': { title: 'Historia researchu', sub: 'Zapisane wyniki badań NotebookLM' },
+    'research-sources-db': { title: 'Baza źródeł', sub: 'Linki z researchów z kategoriami' },
     progress: { title: 'W trakcie...', sub: 'Trwa wykonywanie zadania' },
   };
   function levelMeta(lvl) {
@@ -154,6 +165,11 @@
     if (lvl.level === 'home') renderHome();
     else if (lvl.level === 'generuj' || lvl.level === 'rss' || lvl.level === 'review' || lvl.level === 'analyze' || lvl.level === 'newsletter') renderActionLevel(lvl.level);
     else if (lvl.level === 'auto-watch') renderAutoWatch();
+    else if (lvl.level === 'rss-browse') renderRssBrowse(lvl);
+    else if (lvl.level === 'rss-feed-picker') renderRssFeedPicker();
+    else if (lvl.level === 'topic-queue') renderTopicQueue();
+    else if (lvl.level === 'research-history') renderResearchHistory();
+    else if (lvl.level === 'research-sources-db') renderSourcesDB();
     else if (lvl.level === 'settings') renderSettings();
     else if (lvl.level === 'pickers') renderPickers(lvl);
     else if (lvl.level === 'result') renderResult(lvl.data);
@@ -386,11 +402,12 @@
         { type:'action', icon:'📝', label:'NB Blog Post', desc:'Raport blog-post z NB', gotoLevel:{ level:'nb-studio' } },
       ],
       rss: [
-        { type:'action', icon:'🔍', label:'Sprawdź', desc:'Sprawdź nowe wpisy w feedzie (URL)', action:'rss', needsInput:true, inputLabel:'URL feedu RSS', inputPlaceholder:'https://techcrunch.com/category/artificial-intelligence/feed/', inputDefault:'https://techcrunch.com/category/artificial-intelligence/feed/' },
-        { type:'action', icon:'🖼', label:'Generuj obrazki', desc:'Generuj artykuł + obrazki z feedu', action:'rss', needsInput:true, inputLabel:'URL feedu RSS', inputPlaceholder:'https://techcrunch.com/category/artificial-intelligence/feed/', inputDefault:'https://techcrunch.com/category/artificial-intelligence/feed/', askPush:true },
-        { type:'action', icon:'📄', label:'Generuj feed', desc:'Generuj artykuł z feedu i wypchnij', action:'rss', needsInput:true, inputLabel:'URL feedu RSS', inputPlaceholder:'https://techcrunch.com/category/artificial-intelligence/feed/', inputDefault:'https://techcrunch.com/category/artificial-intelligence/feed/', askPush:true },
+        { type:'action', icon:'🔍', label:'Przeglądaj RSS', desc:'Wczytaj feed, przeglądaj nagłówki, dodaj do kolejki tematów', gotoLevel:{ level:'rss-feed-picker' } },
+        { type:'action', icon:'📋', label:'Kolejka tematów', desc:'Lista zapisanych tematów gotowych do opracowania', gotoLevel:{ level:'topic-queue' } },
+        { type:'action', icon:'➕', label:'Dodaj temat', desc:'Ręcznie dodaj URL/tytuł do kolejki', action:'add-topic', needsInput:true, inputLabel:'URL lub tytuł tematu', inputPlaceholder:'Wklej URL lub wpisz tytuł...' },
         { type:'action', icon:'📰', label:'NB Digest', desc:'Digest przez NotebookLM', gotoLevel:{ level:'nb-category', notebookKey:'news' } },
         { type:'action', icon:'🔬', label:'NB Web Research', desc:'Research z query — deep mode', gotoLevel:{ level:'nb-sources' } },
+        { type:'nav', icon:'📡', label:'Auto-watch', desc:'Monitoruj wszystkie feedy automatycznie', gotoLevel:{ level:'auto-watch' } },
       ],
       review: [
         { type:'action', icon:'📝', label:'Review all', desc:'Przejrzyj wszystkie nowe wpisy', action:'review' },
@@ -423,6 +440,387 @@
   }
 
   // ===========================
+  // RSS feed picker — curated list of feeds + custom URL
+  // ===========================
+  async function renderRssFeedPicker() {
+    tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📡</div><div class="result-title">Kanały RSS</div><div class="result-desc">Ładowanie...</div></div>';
+    try {
+      const resp = await fetch('/api/feeds');
+      const data = await resp.json();
+      const feeds = data.feeds || [];
+      if (!feeds.length) { tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📭</div><div class="result-title">Brak feedów</div><div class="result-desc">Dodaj feedy w feeds.json</div></div>'; return; }
+      const regions = [
+        { label:'USA Tech / Business',     keys:['techcrunch','verge','wired','cnbc','venturebeat','mit','forbes','bloomberg','ars','register','business insider','hacker news'] },
+        { label:'Social / Reddit',         keys:['reddit'] },
+        { label:'Amazon / E-commerce',    keys:['amazon','seller','FBA','dropshipping','ecommerce','e-commerce','shopify','aliexpress','shein','temu','retail','marketing'] },
+        { label:'China',                   keys:['china','scmp','technode','caixin'] },
+        { label:'EU',                      keys:['eu','sifted','tech.eu','eu-startups','next web'] },
+        { label:'Google News',             keys:['gnews','google news'] },
+        { label:'Logistyka / Supply Chain',keys:['supply','logistic','tariff','trade'] },
+      ];
+      function matchRegion(name) {
+        const n = name.toLowerCase();
+        for (const r of regions) { for (const k of r.keys) { if (n.includes(k)) return r.label; } }
+        return 'Inne';
+      }
+      const grouped = {};
+      feeds.forEach(f => {
+        const g = matchRegion(f.name);
+        if (!grouped[g]) grouped[g] = [];
+        grouped[g].push(f);
+      });
+      let html = '<div class="feed-picker-wrap">';
+      html += '<div style="font-size:.78rem;margin-bottom:12px;color:var(--text-muted)">42 kanały RSS — kliknij aby przeglądać i dodać tematy do kolejki</div>';
+      for (const [group, list] of Object.entries(grouped)) {
+        html += '<div class="feed-group"><div class="feed-group-head">' + group + ' (' + list.length + ')</div><div class="feed-grid">';
+        list.forEach(f => {
+          html += '<div class="feed-chip" data-url="' + esc(f.url) + '" data-name="' + esc(f.name) + '">' + esc(f.name) + '</div>';
+        });
+        html += '</div></div>';
+      }
+      html += '<div class="feed-group"><div class="feed-group-head">Własny</div><div class="feed-chip feed-chip-custom" id="customFeedBtn">✏️  Wpisz własny URL RSS...</div></div>';
+      html += '<div style="margin-top:20px;text-align:center"><button class="result-btn feed-back-btn">←  Powrót</button></div>';
+      html += '</div>';
+      tilesEl.innerHTML = html;
+      document.querySelector('.feed-back-btn').addEventListener('click', () => popLevel());
+      document.getElementById('customFeedBtn').addEventListener('click', async () => {
+        const url = await showInputDialogValue('Własny URL', 'Wpisz URL feedu RSS...', 'https://');
+        if (!url) return;
+        pushLevel({ level: 'rss-browse', data: { url } });
+      });
+      document.querySelectorAll('.feed-chip:not(#customFeedBtn)').forEach(el => {
+        el.addEventListener('click', () => {
+          const url = el.dataset.url;
+          const name = el.dataset.name;
+          pushLevel({ level: 'rss-browse', data: { url, name } });
+        });
+      });
+    } catch (e) {
+      tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd</div><div class="result-desc">' + esc(e.message) + '</div></div>';
+    }
+  }
+
+  // ===========================
+  // RSS browse — fetch feed, show items with add-to-queue
+  // ===========================
+  function esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  async function renderRssBrowse(lvl) {
+    const feedUrl = lvl.data && lvl.data.url;
+    tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">🔍</div><div class="result-title">Wczytywanie feeda...</div><div class="result-desc">' + esc(feedUrl) + '</div></div>';
+    try {
+      const resp = await fetch('/api/rss/parse?url=' + encodeURIComponent(feedUrl));
+      const data = await resp.json();
+      if (data.error) { tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd</div><div class="result-desc">' + esc(data.error) + '</div></div>'; return; }
+      const items = data.items || [];
+      const feedTitle = data.feed && data.feed.title ? data.feed.title : 'Feed RSS';
+      let html = '<div style="max-width:640px;margin:0 auto">';
+      html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:1.2rem">🔍</span><strong>' + esc(feedTitle) + '</strong><span style="font-size:.75rem;color:var(--text-muted)">(' + items.length + ' wpisów)</span></div>';
+      html += '<button class="result-btn" id="rssAddAll" style="margin-bottom:12px;width:100%">➕  Dodaj wszystkie do kolejki</button>';
+      items.forEach((item, i) => {
+        const date = item.pubDate ? new Date(item.pubDate).toLocaleDateString('pl-PL') : '';
+        html += '<div class="rss-item" data-idx="' + i + '" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:background .15s">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">';
+        html += '<div style="flex:1;min-width:0"><div style="font-size:.8rem;font-weight:600;line-height:1.3">' + esc(item.title) + '</div>';
+        if (date) html += '<div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">' + date + '</div>';
+        if (item.contentSnippet) html += '<div style="font-size:.72rem;color:var(--text-muted);margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">' + esc(item.contentSnippet) + '</div>';
+        html += '</div>';
+        html += '<button class="result-btn rss-add-btn" data-idx="' + i + '" style="flex-shrink:0;font-size:.72rem;padding:4px 10px">+ Kolejka</button>';
+        html += '</div></div>';
+      });
+      html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="rssBackBtn">←  Powrót</button></div>';
+      html += '</div>';
+      tilesEl.innerHTML = html;
+      const backBtn = document.getElementById('rssBackBtn');
+      if (backBtn) backBtn.addEventListener('click', () => popLevel());
+      document.querySelectorAll('.rss-add-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.dataset.idx);
+          const item = items[idx];
+          btn.textContent = '...';
+          btn.disabled = true;
+          try {
+            const r = await fetch('/api/topics', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ title: item.title, url: item.link || '', source: feedTitle, guid: item.guid }) });
+            const d = await r.json();
+            if (d.ok) { btn.textContent = '✓'; btn.style.borderColor = 'var(--success)'; showToast('✅ Dodano: ' + item.title.slice(0, 40), ''); }
+            else { btn.textContent = 'Błąd'; showToast('Błąd: ' + (d.error || ''), 'err'); }
+          } catch (e) { btn.textContent = 'Błąd'; showToast('Błąd sieci: ' + e.message, 'err'); }
+        });
+      });
+      const addAllBtn = document.getElementById('rssAddAll');
+      if (addAllBtn) {
+        addAllBtn.addEventListener('click', async () => {
+          addAllBtn.textContent = '⏳ Dodawanie...';
+          addAllBtn.disabled = true;
+          let ok = 0, err = 0;
+          for (const item of items) {
+            try {
+              const r = await fetch('/api/topics', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ title: item.title, url: item.link || '', source: feedTitle, guid: item.guid }) });
+              const d = await r.json();
+              if (d.ok) ok++; else err++;
+            } catch { err++; }
+          }
+          showToast('✅ Dodano ' + ok + ' tematów' + (err ? ', błędy: ' + err : ''), '');
+          addAllBtn.textContent = '✅  Dodano ' + ok;
+        });
+      }
+    } catch (e) {
+      tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd sieci</div><div class="result-desc">' + e.message + '</div></div>';
+    }
+  }
+
+  // ===========================
+  // Topic queue — view, remove, mark as done
+  // ===========================
+  async function renderTopicQueue() {
+    tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📋</div><div class="result-title">Kolejka tematów</div><div class="result-desc">Ładowanie...</div></div>';
+    try {
+      const resp = await fetch('/api/topics');
+      const data = await resp.json();
+      const topics = data.topics || [];
+      if (!topics.length) {
+        tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📭</div><div class="result-title">Kolejka pusta</div><div class="result-desc">Dodaj tematy przez Przeglądaj RSS lub ręcznie</div></div>';
+        return;
+      }
+      const pending = topics.filter(t => t.status === 'pending').length;
+      const done = topics.filter(t => t.status === 'done').length;
+      let html = '<div style="max-width:640px;margin:0 auto">';
+      html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:1.2rem">📋</span><strong>Kolejka tematów</strong><span style="font-size:.75rem;color:var(--text-muted)">(' + pending + ' oczekujących, ' + done + ' gotowych)</span></div>';
+      topics.forEach((topic) => {
+        const date = topic.date ? new Date(topic.date).toLocaleDateString('pl-PL') : '';
+        const isDone = topic.status === 'done';
+        html += '<div class="topic-item" data-id="' + topic.id + '" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;opacity:' + (isDone ? '.55' : '1') + '">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">';
+        html += '<div style="flex:1;min-width:0"><div style="font-size:.8rem;font-weight:600;line-height:1.3">' + (isDone ? '✅ ' : '⏳ ') + esc(topic.title) + '</div>';
+        html += '<div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">' + esc(topic.source || '—') + (date ? ' · ' + date : '') + '</div>';
+        if (topic.url) html += '<div style="font-size:.68rem;margin-top:2px"><a href="' + esc(topic.url) + '" target="_blank" style="color:var(--accent)">' + esc(topic.url).slice(0, 60) + '</a></div>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:4px;flex-shrink:0">';
+        if (!isDone) html += '<button class="result-btn topic-done-btn" data-id="' + topic.id + '" style="font-size:.72rem;padding:4px 8px">✅</button>';
+        html += '<button class="result-btn topic-del-btn" data-id="' + topic.id + '" style="font-size:.72rem;padding:4px 8px">🗑</button>';
+        html += '</div></div></div>';
+      });
+      html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="topicBackBtn">←  Powrót</button></div>';
+      html += '</div>';
+      tilesEl.innerHTML = html;
+      const topicBackBtn = document.getElementById('topicBackBtn');
+      if (topicBackBtn) topicBackBtn.addEventListener('click', () => popLevel());
+      document.querySelectorAll('.topic-done-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          try {
+            await fetch('/api/topics/' + id, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status:'done' }) });
+            showToast('✅ Oznaczono jako gotowe', '');
+            renderTopicQueue();
+          } catch (e) { showToast('Błąd: ' + e.message, 'err'); }
+        });
+      });
+      document.querySelectorAll('.topic-del-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = btn.dataset.id;
+          if (!await showConfirm('Usunąć?', 'Usunąć ten temat z kolejki?', 'Usuń', 'Anuluj')) return;
+          try {
+            await fetch('/api/topics/' + id, { method:'DELETE' });
+            showToast('🗑 Usunięto', '');
+            renderTopicQueue();
+          } catch (e) { showToast('Błąd: ' + e.message, 'err'); }
+        });
+      });
+    } catch (e) {
+      tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd sieci</div><div class="result-desc">' + e.message + '</div></div>';
+    }
+  }
+
+  // ===========================
+  // Research history — saved research outputs
+  // ===========================
+  async function renderResearchHistory() {
+    tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📜</div><div class="result-title">Historia researchu</div><div class="result-desc">Ładowanie...</div></div>';
+    try {
+      const resp = await fetch('/api/research-results');
+      const data = await resp.json();
+      const results = data.results || [];
+      if (!results.length) {
+        tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📭</div><div class="result-title">Brak wyników</div><div class="result-desc">Uruchom Web Research aby zobaczyć tu historię</div></div>';
+        return;
+      }
+      let html = '<div style="max-width:640px;margin:0 auto">';
+      html += '<div style="font-size:.8rem;margin-bottom:12px;color:var(--text-muted)">' + results.length + ' zapisanych researchy</div>';
+      results.forEach((r, i) => {
+        const date = r.date ? new Date(r.date).toLocaleDateString('pl-PL') + ' ' + new Date(r.date).toLocaleTimeString('pl-PL', {hour:'2-digit',minute:'2-digit'}) : '';
+        html += '<div class="research-entry" id="research-' + i + '" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">';
+        html += '<div style="font-size:.78rem;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📜 ' + esc(r.query || '---') + '</div>';
+        html += '<span style="font-size:.65rem;color:var(--text-muted);flex-shrink:0">' + date + '</span>';
+        html += '</div></div>';
+      });
+      html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="rhBackBtn">←  Powrót</button></div>';
+      html += '</div>';
+      tilesEl.innerHTML = html;
+      document.getElementById('rhBackBtn').addEventListener('click', () => popLevel());
+      document.querySelectorAll('.research-entry').forEach(el => {
+        el.addEventListener('click', () => {
+          const idx = parseInt(el.id.replace('research-', ''));
+          const r = results[idx];
+          if (!r) return;
+          const date = r.date ? new Date(r.date).toLocaleString('pl-PL') : '';
+          showDialog('Research: ' + esc(r.query || '---'), '<div style="font-size:.7rem;color:var(--text-muted);margin-bottom:8px">' + date + '</div><pre style="white-space:pre-wrap;word-break:break-all;font-size:.7rem;max-height:50vh;overflow-y:auto;background:var(--bg);padding:8px;border-radius:4px">' + esc(r.output || '') + '</pre>', [
+            { label:'Zamknij', style:'secondary', value:null },
+          ]);
+        });
+      });
+    } catch (e) {
+      tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd</div><div class="result-desc">' + esc(e.message) + '</div></div>';
+    }
+  }
+
+  // ===========================
+  // Sources DB — all research links with categories
+  // ===========================
+  async function renderSourcesDB() {
+    tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📚</div><div class="result-title">Baza źródeł</div><div class="result-desc">Ładowanie...</div></div>';
+    try {
+      const resp = await fetch('/api/research-sources');
+      const data = await resp.json();
+      renderSourcesDBWith(data);
+    } catch (e) {
+      tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd</div><div class="result-desc">' + esc(e.message) + '</div></div>';
+    }
+  }
+
+  function renderSourcesDBWith(data) {
+    const sources = data.sources || [];
+    const categories = data.categories || [];
+    let html = '<div style="max-width:700px;margin:0 auto">';
+    html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px">';
+    html += '<button class="feed-chip cat-filter' + (!window._srcFilter ? ' active' : '') + '" data-cat="" style="font-size:.65rem;padding:4px 8px">Wszystkie (' + sources.length + ')</button>';
+    categories.forEach(cat => {
+      const ci = RESEARCH_CATEGORIES[cat] || { icon:'📊', label:cat };
+      html += '<button class="feed-chip cat-filter' + (window._srcFilter === cat ? ' active' : '') + '" data-cat="' + esc(cat) + '" style="font-size:.65rem;padding:4px 8px">' + ci.icon + ' ' + ci.label + '</button>';
+    });
+    html += '</div>';
+    if (!sources.length) {
+      html += '<div style="text-align:center;padding:2rem;color:var(--text-muted)">Brak źródeł w tej kategorii</div>';
+    } else {
+      sources.forEach(s => {
+        const ci = RESEARCH_CATEGORIES[s.category] || { icon:'📊', label:s.category || 'ogólne' };
+        const date = s.date ? new Date(s.date).toLocaleDateString('pl-PL') : '';
+        html += '<div class="source-item" style="border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:4px;display:flex;align-items:center;gap:8px">';
+        html += '<span style="font-size:.9rem;flex-shrink:0">' + ci.icon + '</span>';
+        html += '<div style="flex:1;min-width:0">';
+        html += '<a href="' + esc(s.url) + '" target="_blank" style="font-size:.76rem;font-weight:600;color:var(--accent);text-decoration:none">' + esc(s.title || s.url).slice(0, 80) + '</a>';
+        html += '<div style="font-size:.64rem;color:var(--text-muted)">' + esc(s.researchQuery || '') + (date ? ' · ' + date : '') + '</div>';
+        html += '</div>';
+        html += '<button class="result-btn src-to-topic-btn" data-id="' + esc(s.id) + '" style="font-size:.65rem;padding:3px 8px;flex-shrink:0">📋 Kolejka</button>';
+        html += '</div>';
+      });
+    }
+    html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="sdbBackBtn">←  Powrót</button></div>';
+    html += '</div>';
+    tilesEl.innerHTML = html;
+    document.getElementById('sdbBackBtn').addEventListener('click', () => popLevel());
+    document.querySelectorAll('.cat-filter').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cat = btn.dataset.cat;
+        window._srcFilter = cat || '';
+        const url = cat ? '/api/research-sources?category=' + encodeURIComponent(cat) : '/api/research-sources';
+        fetch(url).then(r => r.json()).then(d => renderSourcesDBWith(d)).catch(() => {});
+      });
+    });
+    document.querySelectorAll('.src-to-topic-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const id = btn.dataset.id;
+        const s = sources.find(x => x.id === id);
+        if (!s) return;
+        btn.textContent = '...'; btn.disabled = true;
+        try {
+          const r = await fetch('/api/topics', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ title: s.title, url: s.url, source: 'research-' + (s.researchQuery || ''), guid: s.url }) });
+          const d = await r.json();
+          if (d.ok) { btn.textContent = '✓'; showToast('Dodano do kolejki', ''); }
+          else { btn.textContent = 'Błąd'; showToast('Błąd: ' + (d.error || ''), 'err'); }
+        } catch (e2) { btn.textContent = 'Błąd'; showToast('Błąd sieci: ' + e2.message, 'err'); }
+      });
+    });
+  }
+
+  // ===========================
+  // Generic NB action with live progress streaming
+  // ===========================
+  async function handleNbWithProgress(el, nbAction, args, label, category) {
+    if (running) { showToast('Najpierw poczekaj na zakończenie zadania', 'err'); return; }
+    // Verify NB auth before running any command
+    try {
+      const authResp = await fetch('/api/nb/auth-status');
+      const authData = await authResp.json();
+      if (!authData.auth) {
+        nbAuthed = false; updateNbStatusUI();
+        showToast('🔑 NotebookLM nie zalogowany. Kliknij "Zaloguj do NotebookLM" w Dashboard', 'err');
+        return;
+      }
+      nbAuthed = true; updateNbStatusUI();
+    } catch { /* skip auth check on network error */ }
+    el.classList.add('running');
+    try {
+      const resp = await fetch('/api/run/nb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: nbAction, args }),
+      });
+      const data = await resp.json();
+      if (!data.ok || !data.runId) {
+        el.classList.remove('running');
+        showToast('Błąd: ' + (data.error || 'nieznany'), 'err');
+        return;
+      }
+      running = { tileAction: { label: label || nbAction }, el, output: '' };
+      pushLevel({ level: 'progress', data: { action: 'nb-run', label: label || nbAction } });
+      const es = new EventSource(`/api/run/${data.runId}/stream`);
+      running.es = es;
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'connected') return;
+          if (msg.done) {
+            es.close();
+            el.classList.remove('running');
+            if (running && running._progressTimer) clearInterval(running._progressTimer);
+            addJobToQueue(label || nbAction, msg.error ? 'error' : 'done', msg.output);
+            // Save research results to log
+            if (nbAction === 'add-research' && msg.output) {
+              const q = args[1] ? String(args[1]).split('--- Pytanie użytkownika ---').pop().trim().slice(0, 200) : (label || '');
+              fetch('/api/research-results', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ query: q, output: msg.output, category: category || 'general' }) }).catch(() => {});
+            }
+            running = null;
+            navStack = navStack.filter(l => l.level !== 'progress');
+            pushLevel({ level: 'result', data: { success: !msg.error, error: msg.error, action: nbAction, label: label || nbAction, category: category || '', output: msg.output || '' } });
+            return;
+          }
+          if (msg.data) {
+            running.output = (running.output || '') + msg.data;
+            if (currentLevel().level === 'progress') renderProgressLive(running.output);
+          }
+        } catch {}
+      };
+      es.onerror = () => {
+        es.close();
+        showToast('Utracono połączenie z serwerem', 'err');
+        el.classList.remove('running');
+        if (running && running._progressTimer) clearInterval(running._progressTimer);
+        running = null;
+        navStack = navStack.filter(l => l.level !== 'progress');
+        render();
+      };
+    } catch (e) {
+      el.classList.remove('running');
+      showToast('Błąd sieci: ' + e.message, 'err');
+    }
+  }
+
   // NotebookLM
   // ===========================
   function renderNotebooklm() {
@@ -449,6 +847,8 @@
       { type:'action', icon:'▶️', label:'Dodaj YouTube', desc:'Dodaj film jako źródło', nbAction:'source-youtube' },
       { type:'action', icon:'📄', label:'Dodaj PDF', desc:'Dodaj plik PDF jako źródło', nbAction:'source-pdf' },
       { type:'action', icon:'🔬', label:'Web Research', desc:'Dodaj research z query', nbAction:'source-research' },
+      { type:'nav', icon:'📜', label:'Historia researchu', desc:'Zapisane wyniki badań NotebookLM', gotoLevel:{ level:'research-history' } },
+      { type:'nav', icon:'📚', label:'Baza źródeł', desc:'Linki z kategoriami — dodaj do kolejki', gotoLevel:{ level:'research-sources-db' } },
       { type:'nav', icon:'📚', label:'Źródła — Sources', desc:'Lista istniejących źródeł', gotoLevel:{ level:'nb-category', notebookKey:'sources' } },
     ];
     tiles.push({ type:'back' });
@@ -464,36 +864,27 @@
       const label = t.nbAction === 'source-url' ? 'URL' : t.nbAction === 'source-youtube' ? 'YouTube URL' : 'Ścieżka do PDF';
       const url = await showInputDialogValue(`Dodaj ${label}`, `Wpisz ${label.toLowerCase()}...`);
       if (!url) return;
-      el.classList.add('running');
-      try {
-        const typeMap = { 'source-url':'url', 'source-youtube':'youtube', 'source-pdf':'url' };
-        const resp = await fetch('/api/nb/source-add', {
-          method: 'POST',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ notebookId: NB_NOTEBOOKS.sources.id, content: url, type: typeMap[t.nbAction] }),
-        });
-        const data = await resp.json();
-        el.classList.remove('running');
-        if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-        pushLevel({ level:'result', data: { success:true, action:`NB Source Add`, output: JSON.stringify(data, null, 2) } });
-      } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+      const typeMap = { 'source-url':'url', 'source-youtube':'youtube', 'source-pdf':'url' };
+      await handleNbWithProgress(el, 'source-add', [NB_NOTEBOOKS.sources.id, url, '--type', typeMap[t.nbAction]], 'Dodawanie źródła');
       return;
     }
     if (t.nbAction === 'source-research') {
+      const category = await showCategoryPicker();
+      if (!category) return;
       const query = await showInputDialogValue('Web Research', 'Czego szukać...');
       if (!query) return;
-      el.classList.add('running');
+      const catInfo = RESEARCH_CATEGORIES[category];
+      const catTag = catInfo ? catInfo.icon + ' ' + catInfo.label : category;
+      // Prepend systemprompt context + category to guide NotebookLM research
+      let fullQuery = query;
       try {
-        const resp = await fetch('/api/nb/add-research', {
-          method: 'POST',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ notebookId: NB_NOTEBOOKS.research.id, query, mode:'deep' }),
-        });
-        const data = await resp.json();
-        el.classList.remove('running');
-        if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-        pushLevel({ level:'result', data: { success:true, action:`NB Research`, output: JSON.stringify(data, null, 2) } });
-      } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+        const spResp = await fetch('/api/nb/init-context', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+        const spData = await spResp.json();
+        if (spData.ok && spData.content) {
+          fullQuery = spData.content + '\n\n--- Kategoria: ' + catTag + ' ---\n--- Pytanie użytkownika ---\n' + query;
+        }
+      } catch {}
+      await handleNbWithProgress(el, 'add-research', [NB_NOTEBOOKS.research.id, fullQuery, '--mode', 'deep'], 'Research: ' + catTag, category);
     }
   }
 
@@ -515,9 +906,8 @@
 
   async function handleNbStudioAction(t, el) {
     const action = t.nbAction;
-    // Downloads: list artifacts from a notebook
+    // Downloads: quick list (keep as-is, fast GET)
     if (action === 'studio-downloads') {
-      const nbKeys = Object.keys(NB_NOTEBOOKS);
       const nbChoice = await showChoice('Wybierz notebook', 'Z którego notebooka pobrać?',
         { label: NB_NOTEBOOKS.news.title, value: 'news' },
         { label: NB_NOTEBOOKS.research.title, value: 'research' }
@@ -537,33 +927,17 @@
       } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
       return;
     }
-    // Pick a notebook first
-    const nbKeys = Object.keys(NB_NOTEBOOKS);
+    // Studio report/audio/video: pick notebook, then stream
     const nbChoice = await showChoice('Wybierz notebook', 'Z którego notebooka?',
       { label: NB_NOTEBOOKS.news.title, value: 'news' },
       { label: NB_NOTEBOOKS.research.title, value: 'research' }
     );
     if (!nbChoice) return;
     const nbId = NB_NOTEBOOKS[nbChoice].id;
-    el.classList.add('running');
-    try {
-      let url, opts = { method:'POST', headers:{'Content-Type':'application/json'} };
-      if (action === 'studio-report') {
-        url = '/api/nb/generate-report';
-        opts.body = JSON.stringify({ notebookId: nbId, format:'blog-post' });
-      } else if (action === 'studio-audio') {
-        url = '/api/nb/generate-audio';
-        opts.body = JSON.stringify({ notebookId: nbId, format:'deep-dive' });
-      } else if (action === 'studio-video') {
-        url = '/api/nb/generate-report'; // fallback: report z wideo opisem
-        opts.body = JSON.stringify({ notebookId: nbId, format:'briefing-doc' });
-      }
-      const resp = await fetch(url, opts);
-      const data = await resp.json();
-      el.classList.remove('running');
-      if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-      pushLevel({ level:'result', data: { success:true, action:`NB ${action}`, output: JSON.stringify(data, null, 2) } });
-    } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+    const fmtMap = { 'studio-report':'blog-post', 'studio-audio':'deep-dive', 'studio-video':'briefing-doc' };
+    const cmdMap = { 'studio-report':'generate-report', 'studio-audio':'generate-audio', 'studio-video':'generate-report' };
+    const labelMap = { 'studio-report':'Generowanie raportu', 'studio-audio':'Generowanie audio', 'studio-video':'Generowanie video' };
+    await handleNbWithProgress(el, cmdMap[action], [nbId, '--format', fmtMap[action]], labelMap[action]);
   }
 
   function renderNbInsights() {
@@ -584,59 +958,38 @@
   async function handleNbInsightsAction(t, el) {
     const action = t.nbAction;
     if (action === 'insights-guide') {
-      // Pick a source from research notebook, get its guide/keywords
       const query = await showInputDialogValue('Source Guide', 'Nazwa źródła (lub pierwsze litery ID)...');
       if (!query) return;
       el.classList.add('running');
       try {
-        // First get sources list
         const srcResp = await fetch(`/api/nb/notebooks/${NB_NOTEBOOKS.research.id}/sources`);
         const srcData = await srcResp.json();
         const sources = srcData.sources || [];
-        // Try to match source
         const match = sources.find(s => (s.title || '').toLowerCase().includes(query.toLowerCase()) || (s.id || '').includes(query));
         if (!match) { el.classList.remove('running'); showToast('Nie znaleziono źródła', 'err'); return; }
-        const resp = await fetch('/api/nb/source-guide', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ notebookId: NB_NOTEBOOKS.research.id, sourceId: match.id }),
-        });
-        const data = await resp.json();
         el.classList.remove('running');
-        if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-        pushLevel({ level:'result', data: { success:true, action:`NB Source Guide (${match.title})`, output: JSON.stringify(data, null, 2) } });
+        await handleNbWithProgress(el, 'source-guide', [NB_NOTEBOOKS.research.id, match.id], 'Source Guide');
       } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
       return;
     }
     if (action === 'insights-research') {
+      const category = await showCategoryPicker();
+      if (!category) return;
       const query = await showInputDialogValue('Deep Research', 'Temat do zbadania...');
       if (!query) return;
-      el.classList.add('running');
-      try {
-        const resp = await fetch('/api/nb/add-research', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ notebookId: NB_NOTEBOOKS.research.id, query, mode:'deep' }),
-        });
-        const data = await resp.json();
-        el.classList.remove('running');
-        if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-        pushLevel({ level:'result', data: { success:true, action:`NB Deep Research`, output: JSON.stringify(data, null, 2) } });
-      } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+      const catInfo = RESEARCH_CATEGORIES[category];
+      const catTag = catInfo ? catInfo.icon + ' ' + catInfo.label : category;
+      await handleNbWithProgress(el, 'add-research', [NB_NOTEBOOKS.research.id, query, '--mode', 'deep'], 'Research: ' + catTag, category);
       return;
     }
     if (action === 'insights-prompts') {
+      const category = await showCategoryPicker();
+      if (!category) return;
       showToast('Suggest prompts — poprzez ask() z promptem o sugestie', '');
       const question = 'Na podstawie zgromadzonych źródeł, zaproponuj 5 tematów artykułów które warto napisać. Podaj tytuł, format i uzasadnienie dla każdego.';
-      el.classList.add('running');
-      try {
-        const resp = await fetch('/api/nb/ask', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ notebookId: NB_NOTEBOOKS.research.id, question }),
-        });
-        const data = await resp.json();
-        el.classList.remove('running');
-        if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-        pushLevel({ level:'result', data: { success:true, action:`NB Suggest Prompts`, output: JSON.stringify(data, null, 2) } });
-      } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+      const catInfo = RESEARCH_CATEGORIES[category];
+      const catTag = catInfo ? catInfo.icon + ' ' + catInfo.label : category;
+      await handleNbWithProgress(el, 'ask', [NB_NOTEBOOKS.research.id, question], 'Ask: ' + catTag, category);
     }
   }
 
@@ -674,34 +1027,45 @@
     const nbId = t.notebookId;
     const action = t.nbAction;
     if (!nbId || !action) return;
-    el.classList.add('running');
-    try {
-      let url, opts = { headers:{'Content-Type':'application/json'} };
-      if (action === 'summary') {
-        url = `/api/nb/notebooks/${nbId}/summary`;
-      } else if (action === 'sources') {
-        url = `/api/nb/notebooks/${nbId}/sources`;
-      } else if (action === 'report') {
-        url = `/api/nb/generate-report`;
-        opts.method = 'POST'; opts.body = JSON.stringify({ notebookId: nbId });
-      } else if (action === 'audio') {
-        url = `/api/nb/generate-audio`;
-        opts.method = 'POST'; opts.body = JSON.stringify({ notebookId: nbId });
-      } else if (action === 'ask') {
-        const question = await showInputDialogValue('Pytanie', 'Zadaj pytanie o źródła...');
-        if (!question) { el.classList.remove('running'); return; }
-        url = `/api/nb/ask`;
-        opts.method = 'POST'; opts.body = JSON.stringify({ notebookId: nbId, question });
-      }
-      const resp = await fetch(url, opts);
-      const data = await resp.json();
-      el.classList.remove('running');
-      if (data.error) { showToast(`Błąd: ${data.error}`, 'err'); return; }
-      const out = data.output || JSON.stringify(data, null, 2);
-      pushLevel({ level:'result', data: { success: true, action: `NB ${action}`, output: out } });
-    } catch (e) {
-      el.classList.remove('running');
-      showToast(`Błąd sieci: ${e.message}`, 'err');
+
+    // Quick reads (summary, sources): keep synchronous
+    if (action === 'summary') {
+      el.classList.add('running');
+      try {
+        const r = await fetch(`/api/nb/notebooks/${nbId}/summary`);
+        const d = await r.json();
+        el.classList.remove('running');
+        if (d.error) { showToast(`Błąd: ${d.error}`, 'err'); return; }
+        pushLevel({ level:'result', data: { success: true, action: 'NB podsumowanie', output: d.output || JSON.stringify(d, null, 2) } });
+      } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+      return;
+    }
+    if (action === 'sources') {
+      el.classList.add('running');
+      try {
+        const r = await fetch(`/api/nb/notebooks/${nbId}/sources`);
+        const d = await r.json();
+        el.classList.remove('running');
+        if (d.error) { showToast(`Błąd: ${d.error}`, 'err'); return; }
+        const out = (d.sources || []).map(s => `• ${s.title || s.id}`).join('\n');
+        pushLevel({ level:'result', data: { success: true, action: 'NB źródła', output: out || JSON.stringify(d, null, 2) } });
+      } catch (e) { el.classList.remove('running'); showToast(`Błąd sieci: ${e.message}`, 'err'); }
+      return;
+    }
+
+    // Long-running actions: stream via NB runner
+    if (action === 'report') {
+      await handleNbWithProgress(el, 'generate-report', [nbId], 'Generowanie raportu');
+      return;
+    }
+    if (action === 'audio') {
+      await handleNbWithProgress(el, 'generate-audio', [nbId], 'Generowanie audio');
+      return;
+    }
+    if (action === 'ask') {
+      const question = await showInputDialogValue('Pytanie', 'Zadaj pytanie o źródła...');
+      if (!question) return;
+      await handleNbWithProgress(el, 'ask', [nbId, question], 'Pytanie do NB');
     }
   }
 
@@ -1167,9 +1531,74 @@
     const cancelled = data.error === 'cancel';
     const icon = cancelled ? '⚠️' : success ? '✔️' : '❌';
     const iconClass = cancelled ? 'warn' : success ? 'ok' : 'err';
-    const title = cancelled ? 'Przerwano' : success ? 'Artykuł wygenerowany' : 'Błąd';
     const actionLabel = ACTION_LABELS[data.action] || data.action || '';
     const output = data.output || '';
+    const isNbResult = ['add-research','generate-report','generate-audio','ask','source-add','source-guide'].includes(data.action);
+
+    // ── NB actions: show research/report/audio/ask/source results ──
+    if (isNbResult && success) {
+      const titles = { 'add-research':'Research zakończony', 'generate-report':'Raport wygenerowany', 'generate-audio':'Audio wygenerowane', 'ask':'Odpowiedź NB', 'source-add':'Źródło dodane', 'source-guide':'Source Guide' };
+      const title = titles[data.action] || 'Operacja NB zakończona';
+      const cat = data.category || '';
+      const catInfo = cat ? (RESEARCH_CATEGORIES[cat] || { icon:'📊', label:cat }) : null;
+      let bodyHtml = '';
+      // Try to parse JSON with sources (add-research output)
+      try {
+        const parsed = JSON.parse(output.trim());
+        if (parsed.sources && Array.isArray(parsed.sources)) {
+          bodyHtml += '<div style="font-size:.78rem;color:var(--text-muted);margin-bottom:8px">' + (parsed.sources_found || parsed.sources.length) + ' źródeł znalezionych:</div>';
+          bodyHtml += '<ul style="list-style:none;padding:0;margin:0 0 12px 0;text-align:left">';
+          parsed.sources.slice(0, 20).forEach(s => {
+            bodyHtml += '<li style="margin-bottom:4px;font-size:.72rem"><a href="' + esc(s.url) + '" target="_blank" style="color:var(--accent)">🔗 ' + esc(s.title || s.url || '—') + '</a></li>';
+          });
+          bodyHtml += '</ul>';
+        } else if (parsed.answer) {
+          bodyHtml += '<div style="text-align:left;font-size:.78rem;line-height:1.6;max-height:300px;overflow-y:auto;white-space:pre-wrap">' + esc(parsed.answer) + '</div>';
+        } else {
+          bodyHtml += '<div class="progress-output" style="max-height:250px;text-align:left;font-size:.7rem">' + esc(output.slice(0, 2000)) + '</div>';
+        }
+      } catch {
+        bodyHtml += '<div class="progress-output" style="max-height:250px;text-align:left;font-size:.7rem">' + esc(output.slice(0, 2000)) + '</div>';
+      }
+      tilesEl.innerHTML = `
+        <div class="result-card">
+          <div class="result-icon ${iconClass}">${icon}</div>
+          <div class="result-title">${title}</div>
+          ${actionLabel ? '<div class="result-desc">' + actionLabel + '</div>' : ''}
+          ${catInfo ? '<div style="display:inline-block;background:var(--accent);color:#fff;font-size:.65rem;padding:2px 8px;border-radius:10px;margin-bottom:8px">' + catInfo.icon + ' ' + catInfo.label + '</div>' : ''}
+          ${bodyHtml}
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:1rem">
+            <button class="result-btn primary" id="resultNew">🔄  Nowy research</button>
+            <button class="result-btn" id="resultBack2">↩  Powrót</button>
+          </div>
+        </div>`;
+      document.getElementById('resultNew').addEventListener('click', () => {
+        navStack = navStack.filter(l => l.level !== 'result');
+        if (navStack.length > 1) { navStack.pop(); render(); }
+        else popLevel();
+      });
+      document.getElementById('resultBack2').addEventListener('click', popLevel);
+      return;
+    }
+
+    // ── NB error display ──
+    if (isNbResult && !success) {
+      tilesEl.innerHTML = `
+        <div class="result-card">
+          <div class="result-icon err">❌</div>
+          <div class="result-title">Błąd NotebookLM</div>
+          ${actionLabel ? '<div class="result-desc">' + actionLabel + '</div>' : ''}
+          <div class="progress-output" style="max-height:250px;text-align:left;font-size:.7rem">${esc(data.error || output.slice(0, 1500))}</div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:1rem">
+            <button class="result-btn" id="resultBack2">↩  Powrót</button>
+          </div>
+        </div>`;
+      document.getElementById('resultBack2').addEventListener('click', popLevel);
+      return;
+    }
+
+    // ── Article generation: original behavior ──
+    const title = cancelled ? 'Przerwano' : success ? 'Artykuł wygenerowany' : 'Błąd';
     const hasFile = data.file && !cancelled;
 
     // Extract article info from output
@@ -1250,6 +1679,32 @@
   function renderProgress(data) {
     const label = data.label || '';
     const startTime = Date.now();
+
+    // NB operations: simple log view with live output
+    if (data.action === 'nb-run') {
+      tilesEl.innerHTML = `
+        <div class="result-card" id="progressCard" style="padding:1.5rem 1rem;">
+          <div class="result-title" id="progressTitle">${label}</div>
+          <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.8rem" id="progressTimer">⏱ 0s</div>
+          <div class="progress-output" id="progressOutput" style="max-height:400px;margin:0 auto 1rem;width:100%;max-width:620px">⌛  Oczekiwanie na odpowiedź NotebookLM...</div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:.8rem">
+            <button class="result-btn" id="progressCancel">✕  Anuluj</button>
+          </div>
+        </div>`;
+      const timerEl = document.getElementById('progressTimer');
+      const timerInterval = setInterval(() => {
+        if (!timerEl || !document.getElementById('progressCard')) { clearInterval(timerInterval); return; }
+        timerEl.textContent = `⏱ ${Math.floor((Date.now() - startTime) / 1000)}s`;
+      }, 1000);
+      if (running) running._progressTimer = timerInterval;
+      const cancelBtn = document.getElementById('progressCancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', () => {
+        if (running) doCancel();
+        popLevel();
+      });
+      return;
+    }
+
     const steps = [
       { id:'loading', icon:'🔄', label:'Ładowanie modelu', desc:'gemma4:e4b (9GB) — ładuję do RAM...' },
       { id:'warmup', icon:'⏳', label:'Warmup', desc:'Pierwsze zapytanie testowe do modelu' },
@@ -1312,6 +1767,10 @@
     outEl.textContent = clean || '⌛  Oczekiwanie...';
     outEl.scrollTop = outEl.scrollHeight;
 
+    // Skip step detection for NB operations (no progress bar)
+    const bar = document.getElementById('progressBar');
+    if (!bar) return;
+
     // Detect which step is active based on output content
     const activeStep = detectStep(clean);
     updateProgressSteps(activeStep);
@@ -1319,7 +1778,6 @@
     // Update progress bar
     const steps=['loading','warmup','prompt','generating','validate','html','save','deploy'];
     const idx = steps.indexOf(activeStep);
-    const bar = document.getElementById('progressBar');
     if (bar) bar.style.width = `${Math.max(2, ((idx+1)/steps.length)*100)}%`;
 
     // Update title based on step
@@ -1413,6 +1871,23 @@
   // Handle action tile click
   // ===========================
   async function handleActionTile(t, el) {
+    // Add topic manually
+    if (t.action === 'add-topic') {
+      const input = await showInputDialogValue(t.inputLabel || 'URL lub tytuł', t.inputPlaceholder || '');
+      if (!input) return;
+      el.classList.add('running');
+      try {
+        const resp = await fetch('/api/topics', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: input, url: input.startsWith('http') ? input : '', source: 'manual' }),
+        });
+        const data = await resp.json();
+        el.classList.remove('running');
+        if (data.ok) { showToast('✅ Dodano temat do kolejki', ''); } else { showToast('Błąd: ' + (data.error || 'nieznany'), 'err'); }
+      } catch (e) { el.classList.remove('running'); showToast('Błąd sieci: ' + e.message, 'err'); }
+      return;
+    }
+
     // if already running, ask to cancel
     if (running) {
       const ok = await showConfirm('Przerwać?', 'Zadanie jest w trakcie. Przerwać?', 'Przerwij', 'Kontynuuj');
@@ -1641,6 +2116,13 @@
     toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
   }
 
+  function showCategoryPicker() {
+    const cats = Object.entries(RESEARCH_CATEGORIES).map(([key, val]) => ({
+      label: val.icon + ' ' + val.label, style: 'secondary', value: key,
+    }));
+    return showDialog('Wybierz kategorię', '<p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.5rem">Kategoria określa kontekst wyszukiwania w systemprompcie</p>', cats);
+  }
+
   // ===========================
   // Settings API
   // ===========================
@@ -1815,8 +2297,15 @@
   function updateSidebarStats() {
     const aEl = document.getElementById('sidebarArticles');
     const mEl = document.getElementById('sidebarModel');
+    const tEl = document.getElementById('sidebarTopicQueue');
     if (aEl && telemetryCache) aEl.textContent = `${telemetryCache.articles?.total || 0} artykułów`;
     if (mEl) mEl.textContent = (settingsCache.model || '—');
+    if (tEl) {
+      fetch('/api/topics').then(r => r.json()).then(d => {
+        const pending = (d.topics || []).filter(t => t.status === 'pending').length;
+        tEl.textContent = `${(d.topics || []).length} tematów (${pending} do zrobienia)`;
+      }).catch(() => {});
+    }
   }
 
   // Sidebar action clicks
@@ -1831,6 +2320,10 @@
   const articlesStat = document.getElementById('sidebarArticles');
   if (articlesStat) {
     articlesStat.addEventListener('click', () => { if (!running) pushLevel({ level: 'articles' }); });
+  }
+  const topicStat = document.getElementById('sidebarTopicQueue');
+  if (topicStat) {
+    topicStat.addEventListener('click', () => { if (!running) pushLevel({ level: 'topic-queue' }); });
   }
   async function init() {
     initPreloader();
