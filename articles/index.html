@@ -5,42 +5,46 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SmartBuyers – Artykuły</title>
 <style>
-:root{--green:#159957;--green-light:#e6f5ee;--text:#1a1a1a;--text-dim:#636363;--text-muted:#8e8e8e;--bg:#fafafa;--card-bg:#ffffff;--border:#e5e5e5;--radius:8px;--shadow-sm:0 1px 3px rgba(0,0,0,.06);--shadow-md:0 4px 16px rgba(0,0,0,.08);--font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;--max-w:1200px}
+:root{--accent:#159957;--accent-dark:#0f6e3f;--accent-light:#e6f5ee;--text:#111;--text-dim:#555;--text-muted:#888;--bg:#f5f5f0;--card-bg:#fff;--border:#ddd;--radius:6px;--shadow-sm:0 1px 3px rgba(0,0,0,.06);--shadow-md:0 4px 16px rgba(0,0,0,.08);--font:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;--max-w:1200px;--badge-tech:#e84d0e;--badge-reddit:#5461c8;--badge-blog:#159957;--badge-default:#636363}
 *,*:before,*:after{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-font-smoothing:antialiased}
 body{font-family:var(--font);color:var(--text);background:var(--bg);line-height:1.7;min-height:100vh}
-.site-nav{position:sticky;top:0;z-index:100;background:rgba(250,250,250,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 clamp(1rem,3vw,2rem)}
-.nav-inner{max-width:var(--max-w);margin:0 auto;display:flex;align-items:center;gap:clamp(.5rem,2vw,1.5rem);height:56px}
-.nav-logo{font-size:1.15rem;font-weight:700;color:var(--green);text-decoration:none;letter-spacing:-.02em;margin-right:auto}
-.nav-link{font-size:.9rem;color:var(--text-dim);text-decoration:none;padding:.35rem .65rem;border-radius:6px;transition:color .2s,background .2s}
-.nav-link:hover{color:var(--green);background:var(--green-light)}
-.nav-link.active{color:var(--green);font-weight:600}
-.nav-link.external{color:var(--green)}
+.site-nav{position:sticky;top:0;z-index:100;background:rgba(245,245,240,.95);border-bottom:1px solid var(--border);padding:0 clamp(1rem,3vw,2rem)}
+.nav-inner{max-width:var(--max-w);margin:0 auto;display:flex;align-items:center;gap:clamp(.4rem,1.5vw,1.2rem);height:52px}
+.nav-logo{font-size:1.1rem;font-weight:800;color:var(--accent);text-decoration:none;letter-spacing:-.03em;margin-right:auto;text-transform:uppercase}
+.nav-link{font-size:.85rem;color:var(--text-dim);text-decoration:none;padding:.3rem .6rem;border-radius:4px;transition:color .2s,background .2s}
+.nav-link:hover{color:var(--accent);background:var(--accent-light)}
+.nav-link.active{color:var(--accent);font-weight:600}
+.nav-link.external{color:var(--accent)}
 .page-wrap{max-width:var(--max-w);margin:0 auto;padding:0 clamp(1rem,3vw,2rem)}
-.hero{background:linear-gradient(135deg,#0f6e3f,#0a3d25);color:#fff;padding:clamp(2rem,5vw,3.5rem) clamp(1rem,3vw,2rem);margin-bottom:clamp(2rem,3vw,2.5rem)}
+.hero{background:linear-gradient(135deg,#0a3d25,#062818);color:#fff;padding:clamp(2rem,5vw,3.5rem) clamp(1rem,3vw,2rem);margin-bottom:clamp(1.5rem,3vw,2rem)}
 .hero-inner{max-width:var(--max-w);margin:0 auto}
-.hero h1{font-size:clamp(1.6rem,3vw,2.2rem);line-height:1.2;margin-bottom:.5rem}
-.hero p{font-size:clamp(.9rem,1.3vw,1.05rem);color:rgba(255,255,255,.78)}
-.hero-line{width:50px;height:3px;background:var(--green);margin-top:.8rem;border-radius:2px}
-.count-badge{display:inline-block;font-size:.82rem;color:var(--text-dim);margin-bottom:1rem;background:var(--card-bg);padding:.3rem .8rem;border-radius:20px;border:1px solid var(--border)}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:clamp(1rem,2vw,1.5rem)}
-@media(max-width:375px){.card-grid{grid-template-columns:1fr}}
-.card{background:var(--card-bg);border-radius:var(--radius);border:1px solid var(--border);padding:1.5rem;box-shadow:var(--shadow-sm);transition:transform .2s,box-shadow .2s;display:flex;flex-direction:column;gap:.5rem;will-change:transform}
+.hero-eyebrow{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:rgba(255,255,255,.5);margin-bottom:.4rem}
+.hero h1{font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.15;margin-bottom:.5rem;font-weight:800}
+.hero p{font-size:clamp(.85rem,1.2vw,1rem);color:rgba(255,255,255,.75)}
+.hero-line{width:50px;height:3px;background:var(--accent);margin-top:.8rem;border-radius:2px}
+.count-badge{display:inline-block;font-size:.8rem;color:var(--text-dim);margin-bottom:1rem;background:var(--card-bg);padding:.25rem .7rem;border-radius:20px;border:1px solid var(--border)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:clamp(.8rem,1.5vw,1.2rem)}
+.card{background:var(--card-bg);border-radius:var(--radius);border:1px solid var(--border);padding:1.3rem;box-shadow:var(--shadow-sm);transition:transform .2s,box-shadow .2s;display:flex;flex-direction:column;gap:.5rem}
 .card:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
-.card-badge{display:inline-block;font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--green);background:var(--green-light);padding:.15rem .55rem;border-radius:4px;align-self:flex-start}
-.card-title{font-size:1.05rem;font-weight:600;line-height:1.35}
+.card-badge{display:inline-block;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:.15rem .5rem;border-radius:3px;align-self:flex-start;color:#fff;background:var(--badge-default)}
+.card-badge.is-tech{background:var(--badge-tech)}
+.card-badge.is-reddit{background:var(--badge-reddit)}
+.card-badge.is-blog{background:var(--badge-blog)}
+.card-badge.is-article{background:var(--accent)}
+.card-title{font-size:1rem;font-weight:600;line-height:1.35}
 .card-title a{color:var(--text);text-decoration:none}
-.card-title a:hover{color:var(--green)}
-.card-meta{font-size:.78rem;color:var(--text-muted)}
-.card-source{color:var(--green);margin-left:.5rem}
-.card-link{font-size:.85rem;color:var(--green);text-decoration:none;font-weight:500;align-self:flex-start}
+.card-title a:hover{color:var(--accent)}
+.card-meta{font-size:.76rem;color:var(--text-muted);display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.card-source{color:var(--accent);font-size:.76rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.card-link{font-size:.82rem;color:var(--accent);text-decoration:none;font-weight:500;align-self:flex-start}
 .card-link:hover{text-decoration:underline}
-.empty{text-align:center;padding:3rem;color:var(--text-dim)}
-.page-footer{margin-top:clamp(2rem,4vw,3rem);padding:clamp(1.5rem,2vw,2rem) clamp(1rem,3vw,2rem);background:var(--text);color:rgba(255,255,255,.7);font-size:.85rem}
+.empty{text-align:center;padding:2rem;color:var(--text-muted)}
+.page-footer{margin-top:clamp(2rem,4vw,3rem);padding:clamp(1.2rem,2.5vw,2rem) clamp(1rem,3vw,2rem);background:#1a1a1a;color:rgba(255,255,255,.65);font-size:.82rem}
 .footer-inner{max-width:var(--max-w);margin:0 auto;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem}
-.footer-inner a{color:rgba(255,255,255,.7);text-decoration:none}
-.footer-inner a:hover{color:var(--green)}
-@media(max-width:600px){.nav-inner{flex-wrap:wrap;height:auto;padding:.5rem 0;gap:.25rem}.nav-logo{width:100%}.card-grid{grid-template-columns:1fr}}
+.footer-inner a{color:rgba(255,255,255,.65);text-decoration:none}
+.footer-inner a:hover{color:var(--accent)}
+@media(max-width:600px){.nav-inner{flex-wrap:wrap;height:auto;padding:.4rem 0;gap:.2rem}.nav-logo{width:100%;font-size:1rem}.card-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -57,142 +61,89 @@ body{font-family:var(--font);color:var(--text);background:var(--bg);line-height:
 <main>
   <div class="hero">
     <div class="hero-inner">
+      <div class="hero-eyebrow">SmartBuyers — Content Hub</div>
       <h1>📰 Artykuły SmartBuyers</h1>
       <p>AI-generated SEO content — newsy, analizy, poradniki z branży e-commerce i dropshippingu B2B</p>
       <div class="hero-line"></div>
     </div>
   </div>
   <div class="page-wrap">
-    <div class="count-badge">22 artykułów</div>
+    <div class="count-badge">13 artykułów</div>
     <div class="card-grid">
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-article">artykuł</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/top-4-graczy-kt-rzy-chc-zrewolucjonizowa-wiat-it-us-ug.html">Top 4 Graczy Kt Rzy Chc Zrewolucjonizowa Wiat It Us Ug</a></div>
         <div class="card-meta">📅 25.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/former-infosys-chief-has-a-new-startup-that-wants-to-challenge-the-it-services-world/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/top-4-graczy-kt-rzy-chc-zrewolucjonizowa-wiat-it-us-ug.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/top-5-zmian-w-globalnym-rynku-chip-w-co-to-oznacza-dla-polsk.html">Top 5 Zmian W Globalnym Rynku Chip W Co To Oznacza Dla Polsk</a></div>
         <div class="card-meta">📅 25.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/europe-is-pushing-back-on-washingtons-chip-war/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/top-5-zmian-w-globalnym-rynku-chip-w-co-to-oznacza-dla-polsk.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-article">artykuł</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/newsletter-latest.html">Newsletter Latest</a></div>
         <div class="card-meta">📅 24.06.2026</div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/newsletter-latest.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://techstrong.ai/articles/for-most-of-the-world-open-source-ai-is-the-only-way-forward/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://www.theregister.com/research/2026/06/24/boffin-claims-microsofts-supposed-quantum-leap-does-not-compute-due-to-basic-python-errors/5260489</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://www.economist.com/science-and-technology/2026/06/24/why-big-ai-labs-are-hiring-so-many-philosophers</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-computer-use-gemini-3-5-flash/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/figma-adds-code-layers-support-for-animations-more-ai-features-in-new-update/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://www.thomann.de/blog/en/inside/thomann-takes-legal-action-against-fender/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/agility-robotics-plans-to-go-public-via-spac-in-a-2-5b-deal/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/facebook-rolls-out-an-ai-companion-app-for-creators/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
-        <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html">Digest</a></div>
-        <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/companies-are-scrambling-to-stop-employees-from-maxing-out-ai-budgets-with-small-tasks/</span></div>
-        <a href="https://pkrokosz.github.io/smartbuyers/articles/digest.html" class="card-link">Czytaj więcej →</a>
-      </div>
-      <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/digest-technologiczny-tygodnia-od-ai-do-robot-w-i-projektowa.html">Digest Technologiczny Tygodnia Od Ai Do Robot W I Projektowa</a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/companies-are-scrambling-to-stop-employees-from-maxing-out-ai-budgets-with-small-tasks/ | https://techcrunch.com/2026/06/24/facebook-rolls-out-an-ai-companion-app-for-creators/ | https://techcrunch.com/2026/06/24/agility-robotics-plans-to-go-public-via-spac-in-a-2-5b-deal/ | https://techcrunch.com/2026/06/24/figma-adds-code-layers-support-for-animations-more-ai-features-in-new-update/ | https://www.thomann.de/blog/en/inside/thomann-takes-legal-action-against-fender/ | https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-computer-use-gemini-3-5-flash/ | https://www.economist.com/science-and-technology/2026/06/24/why-big-ai-labs-are-hiring-so-many-philosophers | https://www.theregister.com/research/2026/06/24/boffin-claims-microsofts-supposed-quantum-leap-does-not-compute-due-to-basic-python-errors/5260489 | https://techstrong.ai/articles/for-most-of-the-world-open-source-ai-is-the-only-way-forward/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/digest-technologiczny-tygodnia-od-ai-do-robot-w-i-projektowa.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/claude-tag-od-anthropic-ai-te-owie-w-slacku-ucz-si-twojej-fi.html">Claude Tag Od Anthropic Ai Te Owie W Slacku Ucz Si Twojej Fi</a></div>
         <div class="card-meta">📅 24.06.2026</div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/claude-tag-od-anthropic-ai-te-owie-w-slacku-ucz-si-twojej-fi.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/przysz-o-marketingu-w-indiach-jak-miliony-agent-w-ai-zmieni-.html">Przysz O Marketingu W Indiach Jak Miliony Agent W Ai Zmieni </a></div>
         <div class="card-meta">📅 24.06.2026</div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/przysz-o-marketingu-w-indiach-jak-miliony-agent-w-ai-zmieni-.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/nvidia-chce-oszcz-dza-wod-w-centrach-danych-ale-to-tylko-za-.html">Nvidia Chce Oszcz Dza Wod W Centrach Danych Ale To Tylko Za </a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/22/nvidia-wants-to-cut-data-center-water-use-but-thats-not-the-same-as-fixing-ais-water-problem/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/nvidia-chce-oszcz-dza-wod-w-centrach-danych-ale-to-tylko-za-.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/openai-stawia-na-w-asne-chipy-jak-jalape-o-mo-e-zmieni-gr-w-.html">Openai Stawia Na W Asne Chipy Jak Jalape O Mo E Zmieni Gr W </a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/openai-unveils-its-first-custom-chip-built-by-broadcom/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/openai-stawia-na-w-asne-chipy-jak-jalape-o-mo-e-zmieni-gr-w-.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-article">artykuł</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/czym-jest-dropshipping.html">Czym Jest Dropshipping</a></div>
         <div class="card-meta">📅 24.06.2026</div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/czym-jest-dropshipping.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/techcrunch-founder-summit-2026-pass-deal-expires-soon.html">Techcrunch Founder Summit 2026 Pass Deal Expires Soon</a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/24/3-days-left-to-save-up-to-190-on-techcrunch-founder-summit-2026/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/techcrunch-founder-summit-2026-pass-deal-expires-soon.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/google-deepmind-i-a24-stworz-narz-dzia-ai-w-filmowym-stylu.html">Google Deepmind I A24 Stworz Narz Dzia Ai W Filmowym Stylu</a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/22/google-deepmind-bets-75m-on-ais-future-in-hollywood-with-a24-deal/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/google-deepmind-i-a24-stworz-narz-dzia-ai-w-filmowym-stylu.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/amazon-testuje-now-wersj-alexa-z-pod-hindi-w-indiach.html">Amazon Testuje Now Wersj Alexa Z Pod Hindi W Indiach</a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/22/amazon-is-testing-alexa-in-india-with-hindi-support/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/amazon-testuje-now-wersj-alexa-z-pod-hindi-w-indiach.html" class="card-link">Czytaj więcej →</a>
       </div>
       <div class="card">
-        <span class="card-badge">artykuł</span>
+        <span class="card-badge is-tech">tech</span>
         <div class="card-title"><a href="https://pkrokosz.github.io/smartbuyers/articles/anthropic-s-claude-tag-szybki-i-zdecydowany-przys-ogiciel-dl.html">Anthropic S Claude Tag Szybki I Zdecydowany Przys Ogiciel Dl</a></div>
         <div class="card-meta">📅 24.06.2026<span class="card-source">https://techcrunch.com/2026/06/23/anthropics-claude-tag-is-learning-your-company-one-slack-message-at-a-time/</span></div>
         <a href="https://pkrokosz.github.io/smartbuyers/articles/anthropic-s-claude-tag-szybki-i-zdecydowany-przys-ogiciel-dl.html" class="card-link">Czytaj więcej →</a>

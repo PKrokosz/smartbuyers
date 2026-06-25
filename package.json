@@ -4,20 +4,24 @@
   "description": "Strona publikowana na GitHub Pages: [https://pkrokosz.github.io/smartbuyers/](https://pkrokosz.github.io/smartbuyers/)",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "generate": "node rss-watch.mjs",
+    "generate:push": "node rss-watch.mjs --push",
+    "digest": "node rss-watch.mjs --digest --push",
+    "topic": "node generate.mjs",
+    "serve": "npx serve ."
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PKrokosz/smartbuyers.git"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["dropshipping", "ecommerce", "seo", "blog", "ai"],
+  "author": "SmartBuyers",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/PKrokosz/smartbuyers/issues"
   },
-  "homepage": "https://github.com/PKrokosz/smartbuyers#readme",
+  "homepage": "https://pkrokosz.github.io/smartbuyers",
   "dependencies": {
     "rss-parser": "^3.13.0"
   }
