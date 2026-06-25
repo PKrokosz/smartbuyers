@@ -7,3 +7,11 @@ vendor/
 Gemfile.lock
 node_modules/
 backup/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local state
+telemetry.json
+nb-auth-refresh.log

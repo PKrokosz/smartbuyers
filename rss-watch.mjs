@@ -1,20 +1,37 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
+import { execSync } from "child_process";
 import Parser from "rss-parser";
-import { C, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
+import { C, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed, NB_SOURCES_ID, NB_NEWS_ID } from "./lib/shared.mjs";
 import { postToLinkedIn } from "./social.mjs";
 import { generateNewsletter } from "./newsletter.mjs";
+
+function nbPushSource(url, title) {
+  try {
+    const out = execSync(`python "${new URL('./engines/nb_runner.py', import.meta.url).pathname}" source-add "${NB_SOURCES_ID}" "${url}" --type url --title "${title.replace(/"/g,'\\"')}"`, { encoding:"utf8", timeout:60000 });
+    console.log(`  ${C.dim}→ NB source: ${JSON.parse(out).id || 'OK'}${C.rst}`);
+  } catch (e) { console.log(`  ${C.dim}→ NB skip: ${e.message.slice(0,60)}${C.rst}`); }
+}
+
+function nbPushArticle(url, title) {
+  try {
+    execSync(`python "${new URL('./engines/nb_runner.py', import.meta.url).pathname}" source-add "${NB_NEWS_ID}" "${url}" --type url --title "${title.replace(/"/g,'\\"')}"`, { encoding:"utf8", timeout:60000 });
+    console.log(`  ${C.dim}→ NB news: OK${C.rst}`);
+  } catch (e) { console.log(`  ${C.dim}→ NB news skip: ${e.message.slice(0,60)}${C.rst}`); }
+}
 
 const FEEDS_FILE = "feeds.json";
 const mi = process.argv.indexOf("--model"); const MODEL = (mi >= 0 && mi + 1 < process.argv.length) ? process.argv[mi + 1] : "gemma4:e4b";
 const MAX_ITEMS_PER_FEED = 5;
 const verb = process.argv.includes("--verbose") || process.argv.includes("-v");
 const flagReview = process.argv.includes("--review");
+const flagNonInteractive = process.argv.includes("--non-interactive");
+const flagPush = process.argv.includes("--push");
 const flagDigest = process.argv.includes("--digest");
 const queryCount = (() => { const i = process.argv.indexOf("--queries"); return (i >= 0 && i + 1 < process.argv.length) ? parseInt(process.argv[i + 1], 10) || 0 : 0; })();
 const flagNewsletter = process.argv.includes("--newsletter");
 
-const optFormat  = flagDigest ? "digest" : parseFlag(process.argv, "--format", FORMATS, DEF_FORMAT);
+const optFormat  = parseFlag(process.argv, "--format", FORMATS, DEF_FORMAT);
 const optPersona = parseFlag(process.argv, "--persona", PERSONAS, DEF_PERSONA);
 const optTone    = parseFlag(process.argv, "--tone", TONES, DEF_TONE);
 const optLang    = parseFlag(process.argv, "--lang", LANGS, DEF_LANG);
@@ -136,7 +153,7 @@ async function main() {
     console.log(`  ${i + 1}. ${f.name || f.url}${kw} | lastGuid: ${f.lastGuid ? f.lastGuid.slice(0, 30) + "..." : "BRAK"}`);
   });
 
-  const parser = new Parser();
+  const parser = new Parser({ timeout: 30000, headers: { 'User-Agent': 'SmartBuyers/3.0' } });
   let totalGenerated = 0;
   let lastPageUrl;
   const digestItems = [];
@@ -156,6 +173,7 @@ async function main() {
     if (!feed.lastGuid) {
       feed.lastGuid = newestGuid;
       console.log(`  ${C.dim}→ Pierwsze uruchomienie – GUID zapamiętany${C.rst}`);
+      nbPushSource(feed.url, feed.name || "RSS Feed");
       continue;
     }
 
@@ -200,12 +218,16 @@ async function main() {
       console.log(`  Treść: ${snippet.length} znaków | Link: ${itemLink || "brak"}`);
 
       if (flagReview) {
-        const ans = await new Promise(r => {
-          const rl2 = createInterface({ input: process.stdin, output: process.stdout });
-          rl2.question(`  ${C.ylw}[g]eneruj / [p]omiń / [q]wyjdź?${C.rst} `, a => { rl2.close(); r(a.trim().toLowerCase()); });
-        });
-        if (ans === "q") break;
-        if (ans === "p" || ans === "n" || ans === "") { totalGenerated--; feedGenerated--; continue; }
+        if (flagNonInteractive) {
+          console.log(`  ${C.dim}[auto-generuj]${C.rst}`);
+        } else {
+          const ans = await new Promise(r => {
+            const rl2 = createInterface({ input: process.stdin, output: process.stdout });
+            rl2.question(`  ${C.ylw}[g]eneruj / [p]omiń / [q]wyjdź?${C.rst} `, a => { rl2.close(); r(a.trim().toLowerCase()); });
+          });
+          if (ans === "q") break;
+          if (ans === "p" || ans === "n" || ans === "") { totalGenerated--; feedGenerated--; continue; }
+        }
       }
 
       if (feedGenerated === 1 && !(await warmup())) { console.log(`  ${C.red}Ollama offline${C.rst}`); break; }
@@ -218,7 +240,11 @@ async function main() {
       if (gen.issues?.length) console.log(`  ${C.ylw}→ ${gen.issues.join(", ")}${C.rst}`);
 
       const sa = saveArticle(gen, itemTitle, itemLink);
-      if (sa) lastPageUrl = sa.pageUrl;
+      if (sa) {
+        lastPageUrl = sa.pageUrl;
+        nbPushSource(itemLink, itemTitle);
+        nbPushArticle(itemLink, itemTitle);
+      }
     }
 
     if (newCount > 0) console.log(`  → Nowych: ${newCount}${feed.filter ? ` (filtr: ${feed.filter.join(", ")})` : ""}`);
@@ -227,18 +253,22 @@ async function main() {
 
   // --- digest mode: generate one roundup ---
   if (flagDigest && digestItems.length > 0) {
-    step("Generowanie digestu", C.ylw);
-    console.log(`  → ${digestItems.length} wpisów zebranych`);
-
-    if (!(await warmup())) { console.log(`  ${C.red}Ollama offline${C.rst}`); }
-    else {
-      const dig = await generateDigest(digestItems);
-      if (dig && dig.data) {
-        totalGenerated++;
-        const sources = digestItems.map(it => it.link).filter(Boolean).join(" | ");
-        const sa = saveArticle(dig, `Przegląd tygodnia: ${new Date().toLocaleDateString("pl-PL")}`, sources);
-        if (sa) lastPageUrl = sa.pageUrl;
-        for (const it of digestItems) if (it.link) markGen(it.link, "digest");
+    if (digestItems.length <= 1) {
+      log("WARN", "Za mało wpisów do digestu — pomijam", C.ylw);
+    } else {
+      step("Generowanie digestu", C.ylw);
+      console.log(`  → ${digestItems.length} wpisów zebranych`);
+      if (!(await warmup())) { console.log(`  ${C.red}Ollama offline${C.rst}`); }
+      else {
+        const dig = await generateDigest(digestItems);
+        if (dig && dig.data) {
+          totalGenerated++;
+            const sources = digestItems.map(it => it.link).filter(Boolean).join(" | ");
+          const sa = saveArticle(dig, `Przegląd tygodnia: ${new Date().toLocaleDateString("pl-PL")}`, sources);
+          if (sa) nbPushSource(sa.pageUrl, `Digest: ${new Date().toLocaleDateString("pl-PL")}`);
+          if (sa) lastPageUrl = sa.pageUrl;
+          for (const it of digestItems) if (it.link) markGen(it.link, "digest");
+        }
       }
     }
   }
@@ -258,13 +288,13 @@ async function main() {
   writeFileSync(FEEDS_FILE, JSON.stringify(feeds, null, 2));
   generateIndex(); generateSitemap(); generateFeed();
 
-  if (totalGenerated > 0) {
+  if (totalGenerated > 0 && flagPush) {
     step("Git push", C.ylw);
     if (gitPush("articles/ feeds.json generated.json", `Auto: ${totalGenerated} artykuł(i) z RSS`)) {
       if (lastPageUrl) { googleIndexingPing(lastPageUrl); postToLinkedIn("SmartBuyers — Nowy artykuł", "", lastPageUrl); }
     }
     console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/articles/${C.rst}\n`);
-  } else {
+  } else if (totalGenerated > 0) {
     step("Brak nowych wpisów");
   }
 

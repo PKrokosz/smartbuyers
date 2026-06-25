@@ -1,0 +1,9 @@
+{
+  "model": "gemma4:e4b",
+  "format": "list",
+  "persona": "journalist",
+  "tone": "casual",
+  "lang": "pl",
+  "queries": 0,
+  "_digest": true
+}

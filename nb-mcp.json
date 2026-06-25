@@ -1,0 +1,15 @@
+{
+  "_comment": "NotebookLM MCP Server — uruchom przez: python -m notebooklm mcp start",
+  "mcpServers": {
+    "notebooklm": {
+      "command": "python",
+      "args": ["-m", "notebooklm", "mcp", "start"]
+    }
+  },
+  "notebooklm": {
+    "defaultNotebook": "research",
+    "profiles": {
+      "default": "~/.notebooklm/profiles/default"
+    }
+  }
+}

@@ -1,9 +1,18 @@
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "fs";
+import { execSync } from "child_process";
 import { createInterface } from "readline";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
-import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed } from "./lib/shared.mjs";
+import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed, NB_NEWS_ID, NB_SOURCES_ID } from "./lib/shared.mjs";
 import { postToLinkedIn } from "./social.mjs";
+
+function nbPush(url, title) {
+  const nbPy = new URL("./engines/nb_runner.py", import.meta.url).pathname;
+  try {
+    execSync(`python "${nbPy}" source-add "${NB_SOURCES_ID}" "${url}" --type url --title "${title.replace(/"/g,'\\"')}"`, { encoding:"utf8", timeout:60000 });
+    console.log(`  ${C.dim}→ NB Sources: OK${C.rst}`);
+  } catch (e) { console.log(`  ${C.dim}→ NB skip: ${e.message.slice(0,60)}${C.rst}`); }
+}
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 function ask(q) { return new Promise(r => rl.question(q, r)); }
@@ -54,6 +63,7 @@ async function main() {
   // --- parse flags ---
   const raw = process.argv.slice(2);
   const flagPush = raw.includes("--push");
+  const flagNonInteractive = raw.includes("--non-interactive");
   const flagVerb = raw.includes("--verbose") || raw.includes("-v");
   let rssUrl = null;
   const ri = raw.indexOf("--rss");
@@ -65,14 +75,15 @@ async function main() {
   const optTone    = parseFlag(raw, "--tone",    TONES,    DEF_TONE);
   const optLang    = parseFlag(raw, "--lang",    LANGS,    DEF_LANG);
 
-  const skip = new Set(["--push", "--verbose", "-v", "--rss", "--format", "--persona", "--tone", "--lang"]);
+  const skip = new Set(["--push", "--non-interactive", "--verbose", "-v", "--rss", "--format", "--persona", "--tone", "--lang"]);
   const positional = [];
   for (let i = 0; i < raw.length; i++) {
     if (skip.has(raw[i])) { if (raw[i] === "--rss" || raw[i] === "--format" || raw[i] === "--persona" || raw[i] === "--tone" || raw[i] === "--lang") i++; continue; }
     positional.push(raw[i]);
   }
 
-  stepReset(rssUrl ? (flagPush ? 12 : 11) : (flagPush ? 11 : 10));
+  const nb = !process.argv.includes("--no-nb");
+  stepReset(rssUrl ? (flagPush ? (nb ? 13 : 12) : (nb ? 12 : 11)) : (flagPush ? (nb ? 12 : 11) : (nb ? 11 : 10)));
 
   const fmtShort = FORMATS[optFormat].label;
   const personaShort = PERSONAS[optPersona].label;
@@ -90,7 +101,7 @@ async function main() {
   step(rssUrl ? "Pobieranie RSS" : "Pobieranie tematu");
 
   if (rssUrl) {
-    const parser = new Parser();
+    const parser = new Parser({ timeout: 30000, headers: { 'User-Agent': 'SmartBuyers/3.0' } });
     let parsed;
     try {
       parsed = await parser.parseURL(rssUrl);
@@ -102,29 +113,45 @@ async function main() {
     console.log(`  → Niegenerowane: ${available.length} / ${parsed.items.length}`);
     if (available.length === 0) { console.log(`  ${C.dim}→ Wszystkie już wygenerowane${C.rst}`); cleanup(); process.exit(0); }
 
-    console.log("\n  Wybierz newsa:");
-    available.forEach((it, i) => {
-      const d = it.pubDate || it.isoDate || "";
-      const s = (it.contentSnippet || it.content || "").slice(0, 80).replace(/\n/g, " ");
-      console.log(`    ${C.grn}${i + 1}.${C.rst} ${(it.title || "?").slice(0, 90)}`);
-      if (d) console.log(`       ${C.dim}${d.slice(0, 30)}${C.rst}`);
-      if (s) console.log(`       ${C.dim}"${s}..."${C.rst}`);
-    });
+    if (flagNonInteractive) {
+      const chosen = available[0];
+      const cTitle = chosen.title || "Bez tytułu";
+      const cSnippet = (chosen.contentSnippet || chosen.content || "").slice(0, 5000);
+      const cLink = chosen.link;
+      console.log(`\n  → Auto-pick #1: "${cTitle.slice(0, 80)}"`);
+      console.log(`  → Dostępnych: ${available.length} / ${parsed.items.length}`);
 
-    const pick = parseInt(await ask(`\n  Wybierz (1-${available.length}, Enter=1): `), 10);
-    const chosen = available[pick - 1] || available[0];
-    const cTitle = chosen.title || "Bez tytułu";
-    const cSnippet = (chosen.contentSnippet || chosen.content || "").slice(0, 5000);
-    const cLink = chosen.link;
-    console.log(`\n  → "${cTitle.slice(0, 80)}"`);
-    console.log(`  → Treść: ${cSnippet.length} znaków | Link: ${cLink || "brak"}`);
+      topic = cTitle;
+      const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, rssTitle: cTitle, rssSnippet: cSnippet });
+      userContent = bp.user;
+      systemPrompt = bp.system;
+      rssSourceLink = cLink;
+      rssSourceLabel = cTitle;
+    } else {
+      console.log("\n  Wybierz newsa:");
+      available.forEach((it, i) => {
+        const d = it.pubDate || it.isoDate || "";
+        const s = (it.contentSnippet || it.content || "").slice(0, 80).replace(/\n/g, " ");
+        console.log(`    ${C.grn}${i + 1}.${C.rst} ${(it.title || "?").slice(0, 90)}`);
+        if (d) console.log(`       ${C.dim}${d.slice(0, 30)}${C.rst}`);
+        if (s) console.log(`       ${C.dim}"${s}..."${C.rst}`);
+      });
 
-    topic = cTitle;
-    const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, rssTitle: cTitle, rssSnippet: cSnippet });
-    userContent = bp.user;
-    systemPrompt = bp.system;
-    rssSourceLink = cLink;
-    rssSourceLabel = cTitle;
+      const pick = parseInt(await ask(`\n  Wybierz (1-${available.length}, Enter=1): `), 10);
+      const chosen = available[pick - 1] || available[0];
+      const cTitle = chosen.title || "Bez tytułu";
+      const cSnippet = (chosen.contentSnippet || chosen.content || "").slice(0, 5000);
+      const cLink = chosen.link;
+      console.log(`\n  → "${cTitle.slice(0, 80)}"`);
+      console.log(`  → Treść: ${cSnippet.length} znaków | Link: ${cLink || "brak"}`);
+
+      topic = cTitle;
+      const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, rssTitle: cTitle, rssSnippet: cSnippet });
+      userContent = bp.user;
+      systemPrompt = bp.system;
+      rssSourceLink = cLink;
+      rssSourceLabel = cTitle;
+    }
   } else {
     topic = (positional[0] || "").trim();
     if (!topic) topic = (await ask("  Temat artykułu: ")).trim();
@@ -142,10 +169,15 @@ async function main() {
     const models = ollamaModels();
     if (models.length === 0) { console.log(`  ${C.red}→ Brak modeli – uruchom Ollamę${C.rst}`); cleanup(); process.exit(1); }
     if (!model) {
-      console.log("  Dostępne modele:");
-      models.forEach((m, i) => console.log(`    ${i + 1}. ${m}`));
-      const p = parseInt(await ask(`  Wybierz (1-${models.length}, Enter=domyślny): `), 10);
-      model = models[p - 1] || models[0];
+      if (flagNonInteractive) {
+        model = models[0];
+        console.log(`  → ${models.length} modele, auto: ${model}`);
+      } else {
+        console.log("  Dostępne modele:");
+        models.forEach((m, i) => console.log(`    ${i + 1}. ${m}`));
+        const p = parseInt(await ask(`  Wybierz (1-${models.length}, Enter=domyślny): `), 10);
+        model = models[p - 1] || models[0];
+      }
     } else if (!models.includes(model)) { console.log(`  ${C.ylw}→ "${model}" nie znaleziony – używam ${models[0]}${C.rst}`); model = models[0]; }
   } else { if (!model) model = "qwen/qwen-2.5-7b-instruct"; }
   console.log(`  → ${model}`);
@@ -163,28 +195,33 @@ async function main() {
 
   // [5] Warmup
   if (!useOpenRouter) {
-    step("Warmup modelu", C.ylw);
+    step("Warmup modelu (pierwsze uruchomienie — ładuję do RAM)", C.ylw);
+    console.log(`  ${C.dim}→ Model ${model} może ładować się 60-120s przy pierwszym użyciu${C.rst}`);
     const tw = Date.now();
+    // Progress dots during warmup (model may take long to load into RAM)
+    let warmupDone = false;
+    const dotTimer = setInterval(() => { if (!warmupDone) console.log(`  ${C.dim}⌛ wciąż ładuję model... (${((Date.now()-tw)/1000).toFixed(0)}s)${C.rst}`); }, 5000);
     try {
       const wup = await fetch("http://localhost:11434/v1/chat/completions", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model, messages: [{ role: "user", content: "OK" }], max_tokens: 1, think: false }),
       });
+      clearInterval(dotTimer); warmupDone = true;
       if (!wup.ok) { console.log(`  ${C.red}→ ${wup.status}${C.rst}`); cleanup(); process.exit(1); }
       const wj = await wup.json();
-      console.log(`  → ${wj.model||model} | ${((Date.now()-tw)/1000).toFixed(1)}s | ${wj.usage?.total_tokens||"?"} tokenów`);
-    } catch (e) { console.log(`  ${C.red}→ ${e.cause?.message||e.message}${C.rst}`); cleanup(); process.exit(1); }
+      console.log(`  ${C.grn}→ Gotowe! ${wj.model||model} | ${((Date.now()-tw)/1000).toFixed(1)}s | ${wj.usage?.total_tokens||"?"} tokenów${C.rst}`);
+    } catch (e) { clearInterval(dotTimer); console.log(`  ${C.red}→ ${e.cause?.message||e.message}${C.rst}`); cleanup(); process.exit(1); }
   }
 
   // [6] Generate
-  step("Generowanie artykułu", C.ylw);
+  step("Generowanie artykułu (streaming tokenów)", C.ylw);
   const genStart = Date.now();
   let completed = false;
-  const statusLoop = (async () => { while (!completed) { await setTimeout(30000); if (completed) break; console.log(`\n  ${C.dim}[⏱ ${((Date.now()-genStart)/1000).toFixed(0)}s] Wciąż generuję...${C.rst}`); } })();
+  const statusLoop = setInterval(() => { if (!completed) console.log(`  ${C.dim}[⌛ ${((Date.now()-genStart)/1000).toFixed(0)}s] AI pisze artykuł...${C.rst}`); }, 10000);
   let result;
   try { result = await generate(model, systemPrompt, userContent, LANGS[optLang].minWords); }
-  catch (e) { completed = true; console.log(`  ${C.red}→ ${e.message}${C.rst}`); cleanup(); process.exit(1); }
-  completed = true;
+  catch (e) { completed = true; clearInterval(statusLoop); console.log(`  ${C.red}→ ${e.message}${C.rst}`); cleanup(); process.exit(1); }
+  completed = true; clearInterval(statusLoop);
 
   if (!result.data) { console.log(`  ${C.red}→ Nie udało się${C.rst}`); cleanup(); process.exit(1); }
   if (result.issues?.length) console.log(`  ${C.ylw}→ Uwagi: ${result.issues.join(", ")}${C.rst}`);
@@ -215,7 +252,13 @@ async function main() {
   generateFeed();
   console.log(`  → articles/index.html (${idxCount} artykułów) | feed.xml | sitemap.xml`);
 
-  // [10] Push (optional)
+  // [10] NB sync
+  if (nb) {
+    step("NotebookLM", C.ylw);
+    nbPush(pageUrl, artTitle);
+  }
+
+  // [11] Push (optional)
   if (flagPush) {
     step("Git push", C.ylw);
     const files = rssSourceLink ? "articles/ generated.json" : "articles/";

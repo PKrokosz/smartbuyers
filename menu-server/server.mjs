@@ -1,0 +1,720 @@
+import { createServer, request } from "http";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { spawn, execSync } from "child_process";
+import { randomBytes } from "crypto";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const PORT = 3000;
+const DIR = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC = path.join(DIR, "public");
+const ROOT = path.resolve(DIR, "..");
+const MIME = { ".html": "text/html", ".css": "text/css", ".js": "application/javascript", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+
+const runs = new Map();
+
+function uid() { return randomBytes(8).toString("hex"); }
+
+function sseHeaders(res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.write("data: " + JSON.stringify({ type: "connected" }) + "\n\n");
+}
+
+function sendSSE(res, data) {
+  try { res.write("data: " + JSON.stringify(data) + "\n\n"); } catch {}
+}
+
+function json(res, data, status = 200) {
+  res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+  res.end(JSON.stringify(data));
+}
+
+function readJSON(p) {
+  try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; }
+}
+
+function spawnRun(run) {
+  let body = {};
+  try { if (run.body) body = JSON.parse(run.body); } catch {}
+
+  const s = readJSON(path.join(ROOT, "settings.json")) || {};
+
+  // Build command — ponytail: each action is explicit, no config-driven indirection
+  let script, args = [];
+
+  if (run.action === "generate") {
+    script = "generate.mjs";
+    args.push(body.topic || "Czym jest dropshipping B2B");
+  } else if (run.action === "rss") {
+    script = "generate.mjs";
+    args.push("--rss", body.url || "https://techcrunch.com/category/artificial-intelligence/feed/");
+  } else if (run.action === "auto-watch") {
+    script = "rss-watch.mjs";
+  } else if (run.action === "review") {
+    script = "rss-watch.mjs";
+    args.push("--review");
+  } else if (run.action === "analyze") {
+    script = "analyze.mjs";
+  } else if (run.action === "newsletter") {
+    script = "newsletter.mjs";
+  } else if (run.action === "social") {
+    script = "social.mjs";
+  }
+
+  // Common settings
+  args.push("--non-interactive");
+  if (s.model && s.model !== "gemma4:e4b") { args.push("--model", s.model); }
+  if (s.format && s.format !== "article") { args.push("--format", s.format); }
+  if (s.persona && s.persona !== "journalist") { args.push("--persona", s.persona); }
+  if (s.tone && s.tone !== "casual") { args.push("--tone", s.tone); }
+  if (s.lang && s.lang !== "pl") { args.push("--lang", s.lang); }
+  if (s.queries > 0) { args.push("--queries", String(s.queries)); }
+
+  // Push flag (default: on for generate/rss)
+  const push = body.push !== undefined ? body.push : true;
+  if (push) args.push("--push");
+
+  // Auto-watch specific
+  if (run.action === "auto-watch") {
+    if (s._digest) args.push("--digest");
+    if (s._newsletter) args.push("--newsletter");
+    if (s._verbose) args.push("--verbose");
+  }
+
+  const child = spawn(process.execPath, [script, ...args], { cwd: ROOT });
+  run.proc = child;
+
+  run.buf = "";
+  function emit(type, data) {
+    run.buf += data;
+    if (run.res) sendSSE(run.res, { type, data, full: run.buf });
+  }
+  child.stdout.on("data", d => emit("stdout", d.toString()));
+  child.stderr.on("data", d => emit("stderr", d.toString()));
+  child.on("exit", code => {
+    emit("exit", String(code));
+    const ok = code === 0;
+    const doneMsg = { done: true, success: ok, error: ok ? null : "exit code " + code, output: run.buf };
+    if (run.res) sendSSE(run.res, doneMsg);
+    run.done = doneMsg;
+    setTimeout(() => runs.delete(run.id), 60000);
+  });
+  child.on("error", e => {
+    const errMsg = { done: true, success: false, error: e.message, output: run.buf };
+    if (run.res) sendSSE(run.res, { type: "error", data: e.message });
+    if (run.res) sendSSE(run.res, errMsg);
+    run.done = errMsg;
+  });
+}
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const p = url.pathname;
+  const m = req.method;
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if (m === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+  // SSE stream endpoint
+  if (m === "GET" && p.startsWith("/api/run/") && p.endsWith("/stream")) {
+    const runId = p.split("/")[3];
+    const run = runs.get(runId);
+    if (!run) { json(res, { error: "not found" }, 404); return; }
+    sseHeaders(res);
+    run.res = res;
+    req.on("close", () => { run.res = null; });
+    // Replay buffer if process already running or finished
+    if (run.buf) sendSSE(res, { type: "stdout", data: run.buf, full: run.buf });
+    if (run.done) sendSSE(res, run.done);
+    return;
+  }
+
+  // POST /api/run/:runId/cancel
+  if (m === "POST" && /^\/api\/run\/[a-f0-9]+\/cancel$/.test(p)) {
+    const runId = p.split("/")[3];
+    const run = runs.get(runId);
+    if (run && run.proc) {
+      run.proc.kill("SIGTERM");
+      setTimeout(() => { try { run.proc.kill("SIGKILL"); } catch {} }, 3000);
+      json(res, { ok: true });
+    } else {
+      json(res, { error: "not found" }, 404);
+    }
+    return;
+  }
+
+  // POST /api/run/:action
+  if (m === "POST" && /^\/api\/run\/[a-z][a-z-]+$/.test(p)) {
+    const action = p.replace("/api/run/", "");
+    const VALID = ["generate","rss","auto-watch","review","analyze","newsletter","social"];
+    if (!VALID.includes(action)) { json(res, { ok: false, error: "unknown action" }, 400); return; }
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      const runId = uid();
+      const run = { id: runId, action, res: null, buf: "", body };
+      runs.set(runId, run);
+      json(res, { ok: true, runId }, 202);
+      spawnRun(run);
+    });
+    return;
+  }
+
+  // GET /api/settings
+  if (m === "GET" && p === "/api/settings") {
+    const s = readJSON(path.join(ROOT, "settings.json")) || {};
+    json(res, s);
+    return;
+  }
+
+  // POST /api/settings
+  if (m === "POST" && p === "/api/settings") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const s = JSON.parse(body);
+        writeFileSync(path.join(ROOT, "settings.json"), JSON.stringify(s, null, 2));
+        json(res, { ok: true });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // GET /api/models
+  if (m === "GET" && p === "/api/models") {
+    try {
+      const out = execSync("ollama list", { encoding: "utf8", timeout: 5000 });
+      const models = out.trim().split("\n").slice(1).map(l => l.split(/\s+/)[0]).filter(Boolean);
+      json(res, models);
+    } catch { json(res, []); }
+    return;
+  }
+
+  // GET /api/status
+  if (m === "GET" && p === "/api/status") {
+    try {
+      const out = execSync("ollama list", { encoding: "utf8", timeout: 3000 }).trim();
+      const lines = out.split("\n").filter(l => l.trim());
+      const models = lines.length > 1 ? lines.slice(1).map(l => l.trim().split(/\s+/)[0]).filter(Boolean) : [];
+      json(res, { ollama: models.length > 0, models });
+    } catch { json(res, { ollama: false, models: [] }); }
+    return;
+  }
+
+  // ── NotebookLM API ──────────────────────────────────────────────
+  const NB = path.join(ROOT, "engines", "nb_runner.py");
+  const PY = "python";
+  function nbExec(...args) {
+    let timeout = 30000;
+    if (args[0] === "generate-report" || args[0] === "add-research") timeout = 300000;
+    else if (args[0] === "generate-audio") timeout = 600000;
+    else if (args[0] === "ask") timeout = 180000;
+    const out = execSync(`"${PY}" "${NB}" ${args.map(a => `"${String(a).replace(/"/g,'\\"')}"`).join(" ")}`, { encoding: "utf8", timeout, cwd: ROOT });
+    return JSON.parse(out.trim());
+  }
+
+  // GET /api/nb/auth-status — uses real API call to validate session, not just cookie file check
+  if (m === "GET" && p === "/api/nb/auth-status") {
+    try {
+      const r = nbExec("list");
+      json(res, { auth: true, notebooks: Array.isArray(r) ? r.length : (r.notebooks || []).length });
+    } catch (e) {
+      try {
+        const diag = nbExec("doctor");
+        json(res, { auth: false, error: "Sesja wygasła — kliknij Zaloguj", detail: diag });
+      } catch {
+        json(res, { auth: false, error: e.message }, 503);
+      }
+    }
+    return;
+  }
+
+  // POST /api/nb/login
+  if (m === "POST" && p === "/api/nb/login") {
+    try { json(res, nbExec("login")); }
+    catch (e) { json(res, { ok: false, error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/logout
+  if (m === "POST" && p === "/api/nb/logout") {
+    try { json(res, nbExec("logout")); }
+    catch (e) { json(res, { ok: false, error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/status
+  if (m === "GET" && p === "/api/nb/status") {
+    try { json(res, nbExec("status")); }
+    catch (e) { json(res, { auth: false, error: e.message }, 503); }
+    return;
+  }
+
+  // GET /api/nb/notebooks
+  if (m === "GET" && p === "/api/nb/notebooks") {
+    try { json(res, nbExec("list")); }
+    catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/create
+  if (m === "POST" && p === "/api/nb/create") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        json(res, nbExec("create", b.name || "SmartBuyers Notebook"));
+      });
+    } catch (e) { json(res, { error: e.message }, 400); }
+    return;
+  }
+
+  // POST /api/nb/add-research
+  if (m === "POST" && p === "/api/nb/add-research") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        const mode = b.mode || "fast";
+        const result = nbExec("add-research", b.notebookId, b.query, "--mode", mode);
+        json(res, result);
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/generate-report
+  if (m === "POST" && p === "/api/nb/generate-report") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        const result = nbExec("generate-report", b.notebookId, "--format", b.format || "briefing-doc");
+        json(res, result);
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/generate-audio
+  if (m === "POST" && p === "/api/nb/generate-audio") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        const result = nbExec("generate-audio", b.notebookId, "--format", b.format || "deep-dive");
+        json(res, result);
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/notebooks/:id/summary
+  if (m === "GET" && p.startsWith("/api/nb/notebooks/") && p.endsWith("/summary")) {
+    try {
+      const id = p.replace("/api/nb/notebooks/", "").replace("/summary", "");
+      json(res, nbExec("notebook-summary", id));
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/notebooks/:id/sources
+  if (m === "GET" && p.startsWith("/api/nb/notebooks/") && p.endsWith("/sources")) {
+    try {
+      const id = p.replace("/api/nb/notebooks/", "").replace("/sources", "");
+      json(res, nbExec("sources", id));
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/notebooks/:id/artifacts
+  if (m === "GET" && p.startsWith("/api/nb/notebooks/") && p.endsWith("/artifacts")) {
+    try {
+      const id = p.replace("/api/nb/notebooks/", "").replace("/artifacts", "");
+      json(res, nbExec("artifact-list", id));
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/notebooks/:id/metadata
+  if (m === "GET" && p.startsWith("/api/nb/notebooks/") && p.endsWith("/metadata")) {
+    try {
+      const id = p.replace("/api/nb/notebooks/", "").replace("/metadata", "");
+      json(res, nbExec("metadata", id));
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/source-add
+  if (m === "POST" && p === "/api/nb/source-add") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        const type = b.type || "auto";
+        json(res, nbExec("source-add", b.notebookId, b.content, "--type", type));
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/source-guide
+  if (m === "POST" && p === "/api/nb/source-guide") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        json(res, nbExec("source-guide", b.notebookId, b.sourceId));
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/rename
+  if (m === "POST" && p === "/api/nb/rename") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        json(res, nbExec("rename", b.notebookId, b.title));
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // DELETE /api/nb/notebooks/:id
+  if (m === "DELETE" && /^\/api\/nb\/notebooks\/[a-f0-9]+\/?$/.test(p)) {
+    try {
+      const id = p.replace("/api/nb/notebooks/", "").replace("/", "");
+      json(res, nbExec("delete", id));
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/ask
+  if (m === "POST" && p === "/api/nb/ask") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        json(res, nbExec("ask", b.notebookId, b.question));
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/telemetry
+  if (m === "GET" && p === "/api/nb/telemetry") {
+    try {
+      const nbList = nbExec("list");
+      const nbs = Array.isArray(nbList) ? nbList : (nbList.notebooks || []);
+      let totalSources = 0;
+      for (const nb of nbs) {
+        try {
+          const src = nbExec("sources", nb.id);
+          totalSources += (src.sources || []).length;
+        } catch {}
+      }
+      json(res, { notebooks: nbs.length, totalSources });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/telemetry/competitors
+  if (m === "GET" && p === "/api/telemetry/competitors") {
+    try {
+      const comp = readJSON(path.join(ROOT, "competitors.json")) || [];
+      json(res, { total: comp.length, items: comp });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/telemetry/analyze-summary
+  if (m === "GET" && p === "/api/telemetry/analyze-summary") {
+    try {
+      const gen = readJSON(path.join(ROOT, "generated.json")) || {};
+      const articles = Object.values(gen);
+      const gap = readJSON(path.join(ROOT, "gap-report.json")) || {};
+      const dates = articles.map(a => a.date).filter(Boolean).sort();
+      const allTitles = articles.map(a => a.slug || "").join(" ");
+      const uniqueWords = [...new Set(allTitles.split(/[\s\-]+/).filter(w => w.length > 2))].length;
+      json(res, {
+        articleCount: articles.length,
+        oldestDate: dates[0] || null,
+        newestDate: dates[dates.length - 1] || null,
+        uniqueWords,
+        gapCount: gap.gapCount || 0,
+        keywordCount: (gap.topKeywords || []).length,
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/queries
+  if (m === "GET" && p === "/api/queries") {
+    try {
+      const q = readJSON(path.join(ROOT, "queries.json")) || { pool: [] };
+      json(res, q);
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/queries
+  if (m === "POST" && p === "/api/queries") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        writeFileSync(path.join(ROOT, "queries.json"), JSON.stringify(b, null, 2));
+        json(res, { ok: true });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // GET /api/git-status
+  if (m === "GET" && p === "/api/git-status") {
+    try {
+      const log = execSync("git log --oneline -5", { encoding: "utf8", timeout: 5000, cwd: ROOT }).trim();
+      const branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8", timeout: 5000, cwd: ROOT }).trim();
+      const lastCommit = log.split("\n")[0] || "";
+      const googleKey = !!process.env.GOOGLE_INDEXING_KEY;
+      const linkedinToken = !!process.env.LINKEDIN_TOKEN;
+      json(res, { branch, lastCommit, recentCommits: log.split("\n"), googleIndexing: googleKey, linkedin: linkedinToken });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/tokens
+  if (m === "GET" && p === "/api/tokens") {
+    try {
+      const nbStatus = nbExec("status");
+      const nbCount = nbStatus.notebooks || 0;
+      const recentRuns = Array.from(runs.values()).filter(r => r.buf && r.buf.length > 0).length;
+      json(res, {
+        ollamaModels: (() => { try { return execSync("ollama list", { encoding: "utf8", timeout: 3000 }).trim().split("\n").length - 1; } catch { return 0; } })(),
+        nbNotebooks: nbCount,
+        activeRuns: recentRuns,
+        generatedTotal: Object.keys(readJSON(path.join(ROOT, "generated.json")) || {}).length,
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/downloads
+  if (m === "POST" && p === "/api/nb/downloads") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        const nbId = b.notebookId || "7a31df6c";
+        const type = b.type || "all";
+        const result = nbExec("artifact-list", nbId, "--type", type);
+        const artifacts = result.artifacts || result || [];
+        const items = Array.isArray(artifacts) ? artifacts.map(a => ({
+          id: a.id,
+          title: a.title || a.id,
+          type: a.type || "unknown",
+          created_at: a.created_at || "",
+        })) : [];
+        json(res, { total: items.length, items });
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/download
+  if (m === "POST" && p === "/api/nb/download") {
+    try {
+      let body = "";
+      req.on("data", c => body += c);
+      req.on("end", () => {
+        const b = JSON.parse(body);
+        const args = ["download", b.type || "report", "-n", b.notebookId];
+        if (b.artifactId) args.push(b.artifactId);
+        if (b.outputPath) args.push("--output", b.outputPath);
+        const result = nbExec(...args);
+        json(res, { ok: true, output: JSON.stringify(result, null, 2) });
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/nb/config
+  if (m === "GET" && p === "/api/nb/config") {
+    try {
+      const cfg = readJSON(path.join(ROOT, "nb-config.json")) || {
+        defaultNotebook: "research",
+        audioStyle: "deep-dive",
+        videoStyle: "whiteboard",
+        autoPushSources: true,
+        autoGenerateReport: false,
+      };
+      json(res, cfg);
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/nb/config
+  if (m === "POST" && p === "/api/nb/config") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const b = JSON.parse(body);
+        writeFileSync(path.join(ROOT, "nb-config.json"), JSON.stringify(b, null, 2));
+        json(res, { ok: true });
+      } catch (e) { json(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // POST /api/run/nb-newsletter-report
+  if (m === "POST" && p === "/api/run/nb-newsletter-report") {
+    try {
+      const result = nbExec("generate-report", "5dd3bcd8", "--format", "briefing-doc");
+      json(res, { ok: true, output: JSON.stringify(result, null, 2) });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // POST /api/run/nb-newsletter-audio
+  if (m === "POST" && p === "/api/run/nb-newsletter-audio") {
+    try {
+      const result = nbExec("generate-audio", "992ecd72", "--format", "deep-dive");
+      json(res, { ok: true, output: JSON.stringify(result, null, 2) });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/warmup — preload Ollama model into RAM (SSE via EventSource)
+  if (m === "GET" && p === "/api/warmup") {
+    const model = (() => { try { const s = readJSON(path.join(ROOT, "settings.json")); return s.model || "gemma4:e4b"; } catch { return "gemma4:e4b"; } })();
+    sseHeaders(res);
+    sendSSE(res, { type: "step", step: "warmup_start", data: `Ładowanie modelu ${model} do RAM...\n` });
+    const start = Date.now();
+    const timer = setInterval(() => {
+      sendSSE(res, { type: "step", step: "warmup_progress", data: `⌛ ładuję... (${Math.floor((Date.now()-start)/1000)}s)\n` });
+    }, 5000);
+    const body = JSON.stringify({ model, messages: [{ role: "user", content: "OK" }], max_tokens: 1, stream: false });
+    const hreq = request({ hostname: "localhost", port: 11434, path: "/api/chat", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }, timeout: 300000 }, hres => {
+      let data = "";
+      hres.on("data", c => data += c);
+      hres.on("end", () => {
+        clearInterval(timer);
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        try { const j = JSON.parse(data); sendSSE(res, { done: true, success: true, step: "warmup_done", data: `✅ Gotowe! ${elapsed}s | ${j.model || model}\n`, output: `✅ Model ${model} załadowany w ${elapsed}s` }); }
+        catch { sendSSE(res, { done: true, success: true, step: "warmup_done", data: `✅ Gotowe! ${elapsed}s\n`, output: `✅ Model załadowany w ${elapsed}s` }); }
+      });
+    });
+    hreq.on("error", e => { clearInterval(timer); sendSSE(res, { done: true, success: false, step: "warmup_error", data: `❌ ${e.message}\n`, error: e.message }); });
+    hreq.on("timeout", () => { hreq.destroy(); clearInterval(timer); sendSSE(res, { done: true, success: false, step: "warmup_error", data: "❌ Timeout\n", error: "Timeout" }); });
+    hreq.write(body);
+    hreq.end();
+    req.on("close", () => { clearInterval(timer); hreq.destroy(); });
+    return;
+  }
+
+  // GET /api/articles — list all generated articles
+  if (m === "GET" && p === "/api/articles") {
+    try {
+      const gen = readJSON(path.join(ROOT, "generated.json")) || {};
+      const seen = new Set();
+      const articles = [];
+      for (const [k, v] of Object.entries(gen)) {
+        const slug = v.slug || "";
+        if (!slug || seen.has(slug)) continue;
+        seen.add(slug);
+        const filePath = `articles/${slug}.html`;
+        articles.push({
+          slug: slug,
+          title: slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          date: v.date || "",
+          source: v.source || "",
+          sourceUrl: k || "",
+          format: v.format || "article",
+          persona: v.persona || "",
+          tone: v.tone || "",
+          model: v.model || "gemma4:e4b",
+          words: v.words || 0,
+          size: v.size || "",
+          file: filePath,
+        });
+      }
+      articles.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      json(res, { total: articles.length, articles });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // GET /api/telemetry
+  if (m === "GET" && p === "/api/telemetry") {
+    try {
+      const gen = readJSON(path.join(ROOT, "generated.json")) || {};
+      const articles = Object.entries(gen).filter(([k]) => k.includes("/articles/"));
+      const byMonth = {};
+      let lastDate = null;
+      articles.forEach(([k, v]) => {
+        const d = v.date || "";
+        const m = d.slice(0, 7);
+        if (m) byMonth[m] = (byMonth[m] || 0) + 1;
+        if (d && (!lastDate || d > lastDate)) lastDate = d;
+      });
+      const feeds = readJSON(path.join(ROOT, "feeds.json")) || [];
+      const byMode = {};
+      feeds.forEach(f => { byMode[f.mode || "generate"] = (byMode[f.mode || "generate"] || 0) + 1; });
+      const comp = readJSON(path.join(ROOT, "competitors.json")) || [];
+      const gap = readJSON(path.join(ROOT, "gap-report.json")) || {};
+      json(res, {
+        articles: { total: articles.length, lastDate, byMonth },
+        feeds: { total: feeds.length, byMode },
+        competitors: { total: comp.length },
+        gaps: { gapCount: gap.gapCount || 0, topKeywords: gap.topKeywords || [] },
+        runs: Array.from(runs.values()).map(r => ({
+          action: r.action, success: null, elapsed: null,
+          bodyLen: (r.buf || "").length,
+          date: new Date().toISOString(),
+        })),
+      });
+    } catch (e) { json(res, { error: e.message }, 500); }
+    return;
+  }
+
+  // Static article files from root/articles
+  if (m === "GET" && p.startsWith("/articles/") && p.endsWith(".html")) {
+    const afp = path.join(ROOT, p.replace(/^\//, ""));
+    try {
+      const c = readFileSync(afp);
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(c);
+    } catch { json(res, { error: "article not found" }, 404); }
+    return;
+  }
+
+  // Static files
+  const file = p === "/" ? "/index.html" : p;
+  const fp = path.join(PUBLIC, file);
+  try {
+    const c = readFileSync(fp);
+    const ext = path.extname(fp);
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    res.end(c);
+  } catch { json(res, { error: "not found" }, 404); }
+});
+
+server.listen(PORT, () => {
+  console.log(`\n  🧠 SmartBuyers Tile UI: http://localhost:${PORT}\n`);
+});
