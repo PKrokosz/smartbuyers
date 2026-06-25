@@ -182,6 +182,11 @@ body{min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;font-
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 @media (max-width:680px){.progress-two-col{flex-direction:column}}
 .rss-item:hover{background:var(--bg-hover)}
+/* RSS browse compact grid */
+.rss-items-wrap{max-width:800px;margin:0 auto}
+.rss-items-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:5px}
+.rss-item{transition:background .12s}
+@media (max-width:600px){.rss-items-grid{grid-template-columns:1fr}}
 .topic-item:hover{background:var(--bg-hover)}
 .rss-add-btn:hover{border-color:var(--success) !important}
 .job-item .job-label{color:var(--text)}

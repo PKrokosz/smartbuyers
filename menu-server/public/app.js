@@ -418,8 +418,8 @@
         { type:'action', icon:'🔍', label:'Przeglądaj RSS', desc:'Wczytaj feed, przeglądaj nagłówki, dodaj do kolejki tematów', gotoLevel:{ level:'rss-feed-picker' } },
         { type:'action', icon:'📋', label:'Kolejka tematów', desc:'Lista zapisanych tematów gotowych do opracowania', gotoLevel:{ level:'topic-queue' } },
         { type:'action', icon:'➕', label:'Dodaj temat', desc:'Ręcznie dodaj URL/tytuł do kolejki', action:'add-topic', needsInput:true, inputLabel:'URL lub tytuł tematu', inputPlaceholder:'Wklej URL lub wpisz tytuł...' },
-        { type:'action', icon:'📰', label:'NB Digest', desc:'Digest przez NotebookLM', gotoLevel:{ level:'nb-category', notebookKey:'news' } },
-        { type:'action', icon:'🔬', label:'NB Web Research', desc:'Research z query — deep mode', gotoLevel:{ level:'nb-sources' } },
+        { type:'action', icon:'📰', label:'NB Digest', desc:'Podsumowanie + raport z News NotebookLM', action:'nb-digest' },
+        { type:'action', icon:'🔬', label:'NB Web Research', desc:'Research z query — deep mode przez NotebookLM', action:'nb-web-research' },
         { type:'nav', icon:'📡', label:'Auto-watch', desc:'Monitoruj wszystkie feedy automatycznie', gotoLevel:{ level:'auto-watch' } },
       ],
       review: [
@@ -530,9 +530,10 @@
       if (data.error) { tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">❌</div><div class="result-title">Błąd</div><div class="result-desc">' + esc(data.error) + '</div></div>'; return; }
       const items = data.items || [];
       const feedTitle = data.feed && data.feed.title ? data.feed.title : 'Feed RSS';
-      let html = '<div style="max-width:640px;margin:0 auto">';
+      let html = '<div class="rss-items-wrap">';
       html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:1.2rem">🔍</span><strong>' + esc(feedTitle) + '</strong><span style="font-size:.75rem;color:var(--text-muted)">(' + items.length + ' wpisów)</span></div>';
       html += '<button class="result-btn" id="rssAddAll" style="margin-bottom:12px;width:100%">➕  Dodaj wszystkie do kolejki</button>';
+      html += '<div class="rss-items-grid">';
       items.forEach((item, i) => {
         const date = item.pubDate ? new Date(item.pubDate).toLocaleDateString('pl-PL') : '';
         html += '<div class="rss-item" data-idx="' + i + '" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:background .15s">';
@@ -544,8 +545,9 @@
         html += '<button class="result-btn rss-add-btn" data-idx="' + i + '" style="flex-shrink:0;font-size:.72rem;padding:4px 10px">+ Kolejka</button>';
         html += '</div></div>';
       });
+      html += '</div>'; // .rss-items-grid
       html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="rssBackBtn">←  Powrót</button></div>';
-      html += '</div>';
+      html += '</div>'; // .rss-items-wrap
       tilesEl.innerHTML = html;
       const backBtn = document.getElementById('rssBackBtn');
       if (backBtn) backBtn.addEventListener('click', () => popLevel());
@@ -913,7 +915,6 @@
       { type:'action', icon:'🔬', label:'Web Research', desc:'Dodaj research z query', nbAction:'source-research' },
       { type:'nav', icon:'📜', label:'Historia researchu', desc:'Zapisane wyniki badań NotebookLM', gotoLevel:{ level:'research-history' } },
       { type:'nav', icon:'📚', label:'Baza źródeł', desc:'Linki z kategoriami — dodaj do kolejki', gotoLevel:{ level:'research-sources-db' } },
-      { type:'nav', icon:'📚', label:'Źródła — Sources', desc:'Lista istniejących źródeł', gotoLevel:{ level:'nb-category', notebookKey:'sources' } },
     ];
     tiles.push({ type:'back' });
     renderTiles(tiles, (t, el) => {
@@ -1992,7 +1993,47 @@
       } catch (e) { el.classList.remove('running'); showToast('Błąd sieci: ' + e.message, 'err'); }
       return;
     }
-    // RSS feed picker → generate from curated feed
+    // NB Web Research — direct research from RSS panel
+    if (t.action === 'nb-web-research') {
+      const category = await showCategoryPicker();
+      if (!category) return;
+      const query = await showInputDialogValue('NB Web Research', 'Czego szukać...');
+      if (!query) return;
+      const catInfo = RESEARCH_CATEGORIES[category] || { icon:'📊', label:category };
+      const catTag = catInfo.icon + ' ' + catInfo.label;
+      let fullQuery = query;
+      try {
+        const spResp = await fetch('/api/nb/init-context', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+        const spData = await spResp.json();
+        if (spData.ok && spData.content) {
+          fullQuery = spData.content + '\n\n--- Kategoria: ' + catTag + ' ---\n--- Pytanie użytkownika ---\n' + query;
+        }
+      } catch {}
+      await handleNbWithProgress(el, 'add-research', [NB_NOTEBOOKS.research.id, fullQuery, '--mode', 'deep'], 'Research: ' + catTag, category);
+      return;
+    }
+    // NB Digest — quick summary or report from News notebook
+    if (t.action === 'nb-digest') {
+      const choice = await showChoice('NB Digest — News Notebook', 'Co chcesz zrobić?',
+        { label:'📄 Podsumowanie', value:'summary' },
+        { label:'📝 Generuj raport', value:'report' }
+      );
+      if (!choice) return;
+      const newsId = NB_NOTEBOOKS.news.id;
+      if (choice === 'summary') {
+        el.classList.add('running');
+        try {
+          const r = await fetch(`/api/nb/notebooks/${newsId}/summary`);
+          const d = await r.json();
+          el.classList.remove('running');
+          if (d.error) { showToast('Błąd: ' + d.error, 'err'); return; }
+          pushLevel({ level:'result', data:{ success:true, action:'nb-digest', label:'News Digest', output: d.output || JSON.stringify(d,null,2) } });
+        } catch(e) { el.classList.remove('running'); showToast('Błąd sieci: '+e.message,'err'); }
+      } else {
+        await handleNbWithProgress(el, 'generate-report', [newsId, '--format', 'digest'], 'News Digest Report');
+      }
+      return;
+    }
     if (t.action === 'rss-pick') {
       pushLevel({ level: 'rss-feed-picker-gen' });
       return;
