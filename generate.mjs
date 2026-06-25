@@ -241,7 +241,7 @@ async function main() {
   // [9] generated.json
   if (rssSourceLink) {
     step("generated.json");
-    markGen(rssSourceLink, slug);
+    markGen(rssSourceLink, slug, result.data?.title || result.data?.topic);
     console.log(`  → ${rssSourceLink.slice(0, 60)} → ${slug}`);
   }
 

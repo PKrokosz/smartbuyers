@@ -82,7 +82,7 @@ function saveArticle(gen, title, link) {
   console.log(`  → ${slug} | ${body.length} zn`);
   if (!existsSync("articles")) mkdirSync("articles");
   writeFileSync(fname, html, "utf8");
-  if (link) markGen(link, slug);
+  if (link) markGen(link, slug, title);
   console.log(`  ${C.grn}→ ${fname}${C.rst}`);
   console.log(`  ${C.cyn}→ ${pageUrl}${C.rst}`);
   return { slug, fname, pageUrl };
@@ -267,7 +267,7 @@ async function main() {
           const sa = saveArticle(dig, `Przegląd tygodnia: ${new Date().toLocaleDateString("pl-PL")}`, sources);
           if (sa) nbPushSource(sa.pageUrl, `Digest: ${new Date().toLocaleDateString("pl-PL")}`);
           if (sa) lastPageUrl = sa.pageUrl;
-          for (const it of digestItems) if (it.link) markGen(it.link, "digest");
+          for (const it of digestItems) if (it.link) markGen(it.link, "digest", it.title);
         }
       }
     }
