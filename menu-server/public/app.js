@@ -842,7 +842,7 @@
         return;
       }
       running = { tileAction: { label: label || nbAction }, el, output: '' };
-      pushLevel({ level: 'progress', data: { action: 'nb-run', label: label || nbAction } });
+      pushLevel({ level: 'progress', data: { action: 'nb-run', label: label || nbAction, nbAction } });
       const es = new EventSource(`/api/run/${data.runId}/stream`);
       running.es = es;
       es.onmessage = (e) => {
@@ -1746,11 +1746,15 @@
 
     // NB operations: simple log view with live output
     if (data.action === 'nb-run') {
+      const nbActionLabel = label || 'Operacja NB';
+      const estTimes = { 'add-research':'do 5 min', 'generate-report':'do 5 min', 'generate-audio':'do 10 min', 'ask':'do 3 min' };
+      const estLabel = estTimes[data.nbAction] || '';
       tilesEl.innerHTML = `
         <div class="result-card" id="progressCard" style="padding:1.5rem 1rem;">
-          <div class="result-title" id="progressTitle">${label}</div>
-          <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.8rem" id="progressTimer">⏱ 0s</div>
-          <div class="progress-output" id="progressOutput" style="max-height:400px;margin:0 auto 1rem;width:100%;max-width:620px">⌛  Oczekiwanie na odpowiedź NotebookLM...</div>
+          <div class="result-title" id="progressTitle">${nbActionLabel}</div>
+          <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.4rem" id="progressTimer">⏱ 0s${estLabel ? ' · ' + estLabel : ''}</div>
+          <div class="nb-heartbeat" id="nbHeartbeat" style="text-align:center;font-size:.7rem;color:var(--text-muted);margin-bottom:.5rem">⏳ Oczekiwanie na odpowiedź NotebookLM...</div>
+          <div class="progress-output" id="progressOutput" style="max-height:350px;margin:0 auto 1rem;width:100%;max-width:620px;font-size:.72rem"></div>
           <div style="display:flex;gap:8px;justify-content:center;margin-top:.8rem">
             <button class="result-btn" id="progressCancel">✕  Anuluj</button>
           </div>
@@ -1800,11 +1804,21 @@
         <div class="progress-bar-wrap">
           <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressBar" style="width:2%"></div></div>
         </div>
-        <div class="progress-output" id="progressOutput">⌛  Ładowanie modelu gemma4:e4b do RAM... (9GB, może potrwać ~60s)</div>
+        <div class="progress-two-col">
+          <div class="progress-output" id="progressOutput" style="max-height:300px">⌛  Ładowanie modelu...</div>
+          <div class="article-live-preview" id="articlePreview" style="display:none">
+            <div class="alp-title" id="alpTitle"></div>
+            <div class="alp-body" id="alpBody"></div>
+            <div class="alp-cursor"></div>
+          </div>
+        </div>
         <div style="display:flex;gap:8px;justify-content:center;margin-top:.8rem">
           <button class="result-btn" id="progressCancel">✕  Anuluj (Esc)</button>
         </div>
       </div>`;
+    // Initialize live preview state
+    window._alpText = '';
+    window._alpVisible = false;
     // Auto-update elapsed time every second
     const timerEl = document.getElementById('progressTimer');
     const timerInterval = setInterval(() => {
@@ -1828,6 +1842,33 @@
     const outEl = document.getElementById('progressOutput');
     if (!outEl) return;
     const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+
+    // Detect [CHUNK] markers — divert to live article preview
+    if (clean.includes('[CHUNK]')) {
+      const lines = clean.split('\n');
+      let newText = '';
+      for (const l of lines) {
+        if (l.startsWith('[CHUNK] ')) { newText += l.slice(8); }
+      }
+      if (newText) {
+        window._alpText = (window._alpText || '') + newText;
+        const previewEl = document.getElementById('articlePreview');
+        const bodyEl = document.getElementById('alpBody');
+        if (previewEl && bodyEl) {
+          if (!window._alpVisible) { window._alpVisible = true; previewEl.style.display = 'block'; }
+          bodyEl.textContent = window._alpText;
+          bodyEl.scrollTop = bodyEl.scrollHeight;
+        }
+      }
+      // Also show tech log for non-chunk lines (step indicators)
+      const techLines = lines.filter(l => !l.startsWith('[CHUNK] ') && l.trim());
+      if (techLines.length) {
+        outEl.textContent = techLines.slice(-3).join('\n');
+        outEl.scrollTop = outEl.scrollHeight;
+      }
+      return;
+    }
+
     outEl.textContent = clean || '⌛  Oczekiwanie...';
     outEl.scrollTop = outEl.scrollHeight;
 
@@ -1983,7 +2024,12 @@
         es.onmessage = (e) => {
           try {
             const msg = JSON.parse(e.data);
-            if (msg.type === 'connected') return;
+          if (msg.type === 'connected') return;
+          if (msg.type === 'heartbeat') {
+            const hb = document.getElementById('nbHeartbeat');
+            if (hb) { hb.textContent = '⏳ Oczekiwanie na odpowiedź NotebookLM...'; setTimeout(() => { if (hb) hb.textContent = '⏳ Oczekiwanie na odpowiedź NotebookLM...'; }, 400); }
+            return;
+          }
             if (msg.done) {
               es.close(); el.classList.remove('running');
               if (running && running._progressTimer) clearInterval(running._progressTimer);

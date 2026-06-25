@@ -69,10 +69,12 @@ async def cmd_source_guide(client, nb_id, source_id):
 
 
 async def cmd_add_research(client, nb_id, query, mode="fast"):
+    print(f"⏳ Research: {query[:80]}...", flush=True)
     return _cli("source", "add-research", "-n", nb_id, query, "--mode", mode, "--json", timeout=300)
 
 
 async def cmd_generate_report(client, nb_id, fmt="briefing-doc", description=""):
+    print(f"⏳ Generowanie raportu ({fmt})...", flush=True)
     args = ["generate", "report", "-n", nb_id, "--format", fmt, "--wait", "--json"]
     if description:
         args.extend(["--description", description])
@@ -80,6 +82,7 @@ async def cmd_generate_report(client, nb_id, fmt="briefing-doc", description="")
 
 
 async def cmd_generate_audio(client, nb_id, fmt="deep-dive", description=""):
+    print(f"⏳ Generowanie audio ({fmt})...", flush=True)
     args = ["generate", "audio", "-n", nb_id, "--format", fmt, "--wait", "--json"]
     if description:
         args.extend(["--description", description])
@@ -87,6 +90,7 @@ async def cmd_generate_audio(client, nb_id, fmt="deep-dive", description=""):
 
 
 async def cmd_ask(client, nb_id, question):
+    print(f"⏳ Pytanie do NB: {question[:80]}...", flush=True)
     return _cli("ask", "-n", nb_id, question, "--json", timeout=180)
 
 

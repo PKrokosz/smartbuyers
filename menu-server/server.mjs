@@ -279,7 +279,10 @@ function spawnNbRun(run) {
   }
   child.stdout.on("data", d => emit("stdout", d.toString()));
   child.stderr.on("data", d => emit("stderr", d.toString()));
+  // Heartbeat every 10s to keep SSE alive and show progress
+  const hb = setInterval(() => { if (run.res) sendSSE(run.res, { type: "heartbeat", data: "\n" }); }, 10000);
   child.on("exit", code => {
+    clearInterval(hb);
     emit("exit", String(code));
     const ok = code === 0;
     const doneMsg = { done: true, success: ok, error: ok ? null : "exit code " + code, output: run.buf };
@@ -288,6 +291,7 @@ function spawnNbRun(run) {
     setTimeout(() => runs.delete(run.id), 60000);
   });
   child.on("error", e => {
+    clearInterval(hb);
     const errMsg = { done: true, success: false, error: e.message, output: run.buf };
     if (run.res) sendSSE(run.res, { type: "error", data: e.message });
     if (run.res) sendSSE(run.res, errMsg);
