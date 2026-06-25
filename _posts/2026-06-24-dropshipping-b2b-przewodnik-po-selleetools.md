@@ -1,5 +1,5 @@
 ---
-layout: post
+layout: article
 title: "Dropshipping B2B - Przewodnik po SelleeTools"
 date: 2026-06-24
 categories: blog
