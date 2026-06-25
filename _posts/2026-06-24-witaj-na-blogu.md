@@ -1,5 +1,5 @@
 ---
-layout: post
+layout: article
 title: "Witaj na blogu SmartBuyers"
 date: 2026-06-24
 categories: aktualności
