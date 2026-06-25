@@ -105,7 +105,7 @@
     'git-status': { title: 'Git / Deploy', sub: 'Status repozytorium' },
     articles: { title: 'Artykuły', sub: 'Przegląd wygenerowanych artykułów' },
     'rss-browse': { title: 'Przeglądaj RSS', sub: 'Wpisy z feeda' },
-    'rss-feed-picker': { title: 'Kanały RSS', sub: 'Wybierz feed do przeglądania' },
+    'rss-feed-picker-gen': { title: 'Generuj z RSS', sub: 'Wybierz feed — automatycznie wygeneruje artykuł' },
     'research-history': { title: 'Historia researchu', sub: 'Zapisane wyniki badań NotebookLM' },
     'research-sources-db': { title: 'Baza źródeł', sub: 'Linki z researchów z kategoriami' },
     progress: { title: 'W trakcie...', sub: 'Trwa wykonywanie zadania' },
@@ -167,6 +167,7 @@
     else if (lvl.level === 'auto-watch') renderAutoWatch();
     else if (lvl.level === 'rss-browse') renderRssBrowse(lvl);
     else if (lvl.level === 'rss-feed-picker') renderRssFeedPicker();
+    else if (lvl.level === 'rss-feed-picker-gen') renderRssFeedPickerGen();
     else if (lvl.level === 'topic-queue') renderTopicQueue();
     else if (lvl.level === 'research-history') renderResearchHistory();
     else if (lvl.level === 'research-sources-db') renderSourcesDB();
@@ -396,10 +397,22 @@
   function renderActionLevel(level) {
     const defs = {
       generuj: [
-        { type:'action', icon:'💬', label:'Generuj prompt', desc:'Generuj treść z własnego prompta', action:'generate', needsInput:true, inputLabel:'Treść prompta', inputPlaceholder:'Wpisz temat lub prompt...', askPush:true },
-        { type:'action', icon:'📄', label:'Generuj feed', desc:'Generuj feed HTML/MD/JSON', action:'generate', askPush:true },
-        { type:'action', icon:'📡', label:'Generuj z RSS', desc:'Generuj treść z kanału RSS', action:'rss', needsInput:true, inputLabel:'URL feedu RSS', inputPlaceholder:'https://techcrunch.com/category/artificial-intelligence/feed/', inputDefault:'https://techcrunch.com/category/artificial-intelligence/feed/', askPush:true },
-        { type:'action', icon:'📝', label:'NB Blog Post', desc:'Raport blog-post z NB', gotoLevel:{ level:'nb-studio' } },
+        // ── Group A: Skąd materiał ──
+        { type:'section', icon:'📥', label:'Źródło materiału' },
+        { type:'action', icon:'📋', label:'Z kolejki tematów', desc:'Weź następny pending z kolejki i wygeneruj artykuł', action:'generate-from-queue' },
+        { type:'action', icon:'📡', label:'Z RSS (wybierz feed)', desc:'Wybierz feed z 42 kuratorowanych kanałów RSS', action:'rss-pick' },
+        { type:'action', icon:'🔬', label:'Z NB Research', desc:'Artykuł na podstawie źródeł z ostatniego researchu', action:'generate-from-research' },
+        { type:'action', icon:'🎯', label:'Z luk tematycznych', desc:'Generuj artykuł na niewypełnioną lukę w SEO', action:'generate-from-gap' },
+        { type:'action', icon:'💬', label:'Z własnego promptu', desc:'Wpisz temat — AI napisze artykuł', action:'generate', needsInput:true, inputLabel:'Temat artykułu', inputPlaceholder:'np. Jak zacząć dropshipping B2B...' },
+
+        // ── Group B: Batch ──
+        { type:'section', icon:'⚡', label:'Batch & Pipeline' },
+        { type:'action', icon:'⚡', label:'Przetwórz całą kolejkę', desc:'Wygeneruj artykuły dla wszystkich pending tematów', action:'process-queue' },
+
+        // ── Group C: Narzędzia ──
+        { type:'section', icon:'🛠️', label:'Narzędzia' },
+        { type:'action', icon:'🔄', label:'Regeneruj index/feed', desc:'Odśwież index.html, sitemap.xml i feed.xml (bez generowania)', action:'regenerate-index' },
+        { type:'nav', icon:'📝', label:'NB Studio', desc:'Raporty, audio, wideo przez NotebookLM', gotoLevel:{ level:'nb-studio' } },
       ],
       rss: [
         { type:'action', icon:'🔍', label:'Przeglądaj RSS', desc:'Wczytaj feed, przeglądaj nagłówki, dodaj do kolejki tematów', gotoLevel:{ level:'rss-feed-picker' } },
@@ -575,6 +588,57 @@
 
   // ===========================
   // Topic queue — view, remove, mark as done
+  // ===========================
+  // Feed picker for generation mode — click feed → generate article
+  // ===========================
+  async function renderRssFeedPickerGen() {
+    tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📡</div><div class="result-title">Generuj z RSS</div><div class="result-desc">Ładowanie feedów...</div></div>';
+    try {
+      const resp = await fetch('/api/feeds');
+      const data = await resp.json();
+      const feeds = data.feeds || [];
+      if (!feeds.length) { tilesEl.innerHTML = '<div class="result-card">Brak feedów</div>'; return; }
+      let html = '<div style="max-width:640px;margin:0 auto">';
+      html += '<div style="font-size:.78rem;margin-bottom:8px;color:var(--text-muted)">Wybierz feed — automatycznie weźmie pierwszy nieprzetworzony wpis i wygeneruje artykuł</div>';
+      feeds.forEach(f => {
+        html += '<div class="feed-chip feed-gen-item" data-url="' + esc(f.url) + '" data-name="' + esc(f.name) + '" style="display:block;width:100%;text-align:left;margin-bottom:4px">📡 ' + esc(f.name) + '</div>';
+      });
+      html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="fpgBackBtn">←  Powrót</button></div>';
+      html += '</div>';
+      tilesEl.innerHTML = html;
+      document.getElementById('fpgBackBtn').addEventListener('click', () => popLevel());
+      document.querySelectorAll('.feed-gen-item').forEach(el => {
+        el.addEventListener('click', async () => {
+          const url = el.dataset.url;
+          const fmtOverride = await showFormatPicker();
+          if (fmtOverride === null) return;
+          el.classList.add('running');
+          const body = { url, push: false };
+          if (fmtOverride && fmtOverride !== 'default') { body.format = fmtOverride.format; body.persona = fmtOverride.persona; }
+          body.verbose = !!settingsCache._verbose;
+          try {
+            const resp = await fetch('/api/run/rss', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+            const d = await resp.json();
+            if (!d.ok) { showToast('Błąd: ' + (d.error||''), 'err'); el.classList.remove('running'); return; }
+            running = { tileAction: { label:'RSS: '+el.dataset.name }, el, output:'' };
+            pushLevel({ level:'progress', data:{ action:'rss', label:'RSS: '+el.dataset.name } });
+            const es = new EventSource('/api/run/'+d.runId+'/stream');
+            running.es = es; running.runId = d.runId;
+            es.onmessage = (e) => {
+              try {
+                const m = JSON.parse(e.data);
+                if (m.type==='connected') return;
+                if (m.done) { es.close(); el.classList.remove('running'); if(running&&running._progressTimer) clearInterval(running._progressTimer); addJobToQueue('RSS: '+el.dataset.name, m.error?'error':'done', m.output); running=null; navStack=navStack.filter(l=>l.level!=='progress'); pushLevel({level:'result',data:{success:!m.error,error:m.error,action:'rss',output:m.output||''}}); return; }
+                if (m.data) { running.output=(running.output||'')+m.data; if(currentLevel().level==='progress') renderProgressLive(running.output); }
+              } catch {}
+            };
+            es.onerror = () => { es.close(); showToast('Utracono połączenie','err'); el.classList.remove('running'); if(running&&running._progressTimer) clearInterval(running._progressTimer); running=null; navStack=navStack.filter(l=>l.level!=='progress'); render(); };
+          } catch(e) { el.classList.remove('running'); showToast('Błąd sieci: '+e.message,'err'); }
+        });
+      });
+    } catch(e) { tilesEl.innerHTML = '<div class="result-card">Błąd: '+esc(e.message)+'</div>'; }
+  }
+
   // ===========================
   async function renderTopicQueue() {
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📋</div><div class="result-title">Kolejka tematów</div><div class="result-desc">Ładowanie...</div></div>';
@@ -1887,6 +1951,55 @@
       } catch (e) { el.classList.remove('running'); showToast('Błąd sieci: ' + e.message, 'err'); }
       return;
     }
+    // RSS feed picker → generate from curated feed
+    if (t.action === 'rss-pick') {
+      pushLevel({ level: 'rss-feed-picker-gen' });
+      return;
+    }
+    // Queue / research / gap / batch generation
+    if (['generate-from-queue','generate-from-research','generate-from-gap','process-queue','regenerate-index'].includes(t.action)) {
+      let fmtOverride = null;
+      if (t.action !== 'regenerate-index') {
+        fmtOverride = await showFormatPicker();
+        if (fmtOverride === null) return;
+      }
+      el.classList.add('running');
+      const body = { push: false };
+      if (fmtOverride && fmtOverride !== 'default') {
+        body.format = fmtOverride.format;
+        body.persona = fmtOverride.persona;
+      }
+      body.digest = !!settingsCache._digest;
+      body.newsletter = !!settingsCache._newsletter;
+      body.verbose = !!settingsCache._verbose;
+      try {
+        const resp = await fetch(`/api/run/${t.action}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+        const data = await resp.json();
+        if (!data.ok) { showToast(`Błąd: ${data.error}`, 'err'); el.classList.remove('running'); return; }
+        running = { tileAction: { label: t.label }, el, output: '' };
+        pushLevel({ level: 'progress', data: { action: t.action, label: t.label } });
+        const es = new EventSource(`/api/run/${data.runId}/stream`);
+        running.es = es; running.runId = data.runId;
+        es.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'connected') return;
+            if (msg.done) {
+              es.close(); el.classList.remove('running');
+              if (running && running._progressTimer) clearInterval(running._progressTimer);
+              addJobToQueue(t.label, msg.error ? 'error' : 'done', msg.output);
+              running = null;
+              navStack = navStack.filter(l => l.level !== 'progress');
+              pushLevel({ level: 'result', data: { success: !msg.error, error: msg.error, action: t.action, output: msg.output || '' } });
+              return;
+            }
+            if (msg.data) { running.output = (running.output || '') + msg.data; if (currentLevel().level === 'progress') renderProgressLive(running.output); }
+          } catch {}
+        };
+        es.onerror = () => { es.close(); showToast('Utracono połączenie z serwerem', 'err'); el.classList.remove('running'); if (running && running._progressTimer) clearInterval(running._progressTimer); running = null; navStack = navStack.filter(l => l.level !== 'progress'); render(); };
+      } catch (e) { el.classList.remove('running'); showToast('Błąd sieci: ' + e.message, 'err'); }
+      return;
+    }
 
     // if already running, ask to cancel
     if (running) {
@@ -2121,6 +2234,31 @@
       label: val.icon + ' ' + val.label, style: 'secondary', value: key,
     }));
     return showDialog('Wybierz kategorię', '<p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.5rem">Kategoria określa kontekst wyszukiwania w systemprompcie</p>', cats);
+  }
+
+  function showFormatPicker() {
+    const fmtOpts = Object.entries(FORMAT_OPTS).map(([k, v]) => ({ label: v, style: 'secondary', value: k }));
+    const perOpts = Object.entries(PERSONA_OPTS).map(([k, v]) => ({ label: v, style: 'secondary', value: k }));
+    const curFmt = settingsCache.format || 'article';
+    const curPer = settingsCache.persona || 'journalist';
+    const id = 'fmt_' + Date.now();
+    const html = `
+      <p style="font-size:.75rem;color:var(--text-dim);margin-bottom:6px">Format: <span id="${id}_fmtlbl">${FORMAT_OPTS[curFmt]}</span></p>
+      <div id="${id}_fmtg" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">
+        ${fmtOpts.map(f => `<button class="feed-chip ${curFmt===f.value?'active':''}" onclick="var g=document.getElementById('${id}_fmtg');g.querySelectorAll('.active').forEach(b=>b.classList.remove('active'));this.classList.add('active');document.getElementById('${id}_fmtlbl').textContent='${f.label}'" style="font-size:.65rem">${f.label}</button>`).join('')}
+      </div>
+      <p style="font-size:.75rem;color:var(--text-dim);margin-bottom:6px">Persona: <span id="${id}_perlbl">${PERSONA_OPTS[curPer]}</span></p>
+      <div id="${id}_perg" style="display:flex;flex-wrap:wrap;gap:4px">
+        ${perOpts.map(p => `<button class="feed-chip ${curPer===p.value?'active':''}" onclick="var g=document.getElementById('${id}_perg');g.querySelectorAll('.active').forEach(b=>b.classList.remove('active'));this.classList.add('active');document.getElementById('${id}_perlbl').textContent='${p.label}'" style="font-size:.65rem">${p.label}</button>`).join('')}
+      </div>`;
+    return showDialog('Ustawienia artykułu', html,
+      [{ label:'Użyj globalnych', style:'secondary', value:'default' },{ label:'Generuj z tymi', style:'primary', value:'ok'}]
+    ).then(val => {
+      if (val !== 'ok') return null;
+      const fmtActive = document.querySelector('#' + id + '_fmtg .active');
+      const perActive = document.querySelector('#' + id + '_perg .active');
+      return { format: fmtActive?.textContent ? Object.entries(FORMAT_OPTS).find(([k,v])=>v===fmtActive.textContent)?.[0] || curFmt : curFmt, persona: perActive?.textContent ? Object.entries(PERSONA_OPTS).find(([k,v])=>v===perActive.textContent)?.[0] || curPer : curPer };
+    });
   }
 
   // ===========================

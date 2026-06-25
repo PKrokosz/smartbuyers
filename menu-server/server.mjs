@@ -60,7 +60,7 @@ function spawnRun(run) {
 
   const s = readJSON(path.join(ROOT, "settings.json")) || {};
 
-  // Build command — ponytail: each action is explicit, no config-driven indirection
+  // Build command
   let script, args = [];
 
   if (run.action === "generate") {
@@ -69,6 +69,61 @@ function spawnRun(run) {
   } else if (run.action === "rss") {
     script = "generate.mjs";
     args.push("--rss", body.url || "https://techcrunch.com/category/artificial-intelligence/feed/");
+  } else if (run.action === "generate-from-queue") {
+    // Read first pending topic from topic-queue.json, use it
+    const q = readJSON(TOPICS_PATH) || [];
+    const next = q.find(t => t.status === "pending");
+    if (next) {
+      script = "generate.mjs";
+      args.push(next.title);
+      if (next.url) args.push("--url", next.url);
+      // Will mark as done after success
+      run._topicId = next.id;
+    } else {
+      run.done = { done: true, success: false, error: "Brak pending tematów w kolejce" };
+      return;
+    }
+  } else if (run.action === "generate-from-research") {
+    const srcDb = readJSON(SOURCES_DB_PATH) || [];
+    const recent = srcDb.slice(-5);
+    if (recent.length) {
+      script = "generate.mjs";
+      const titles = recent.map(s => s.title).join(" | ");
+      args.push(titles.slice(0, 300));
+    } else {
+      run.done = { done: true, success: false, error: "Brak źródeł w research DB" };
+      return;
+    }
+  } else if (run.action === "generate-from-gap") {
+    const gap = readJSON(path.join(ROOT, "gap-report.json"));
+    const gaps = gap?.gaps || [];
+    const kw = gap?.topKeywords || [];
+    const topic = gaps[0]?.keyword || kw[0] || "trendy e-commerce";
+    script = "generate.mjs";
+    args.push(typeof topic === "string" ? topic : topic.keyword || String(topic));
+  } else if (run.action === "process-queue") {
+    // Will be handled specially — iterate all pending
+    script = null; // custom handling below
+  } else if (run.action === "regenerate-index") {
+    // Use dynamic import to call shared.mjs functions directly
+    (async () => {
+      try {
+        const shared = await import(path.join(ROOT, "lib", "shared.mjs"));
+        await shared.generateIndex();
+        await shared.generateSitemap();
+        await shared.generateFeed();
+        run.buf = "✅ Index, sitemap i feed zregenerowane\n";
+        const doneMsg = { done: true, success: true, output: run.buf };
+        if (run.res) sendSSE(run.res, doneMsg);
+        run.done = doneMsg;
+      } catch (e) {
+        run.buf = "❌ " + e.message + "\n";
+        const doneMsg = { done: true, success: false, error: e.message, output: run.buf };
+        if (run.res) sendSSE(run.res, doneMsg);
+        run.done = doneMsg;
+      }
+    })();
+    return;
   } else if (run.action === "auto-watch") {
     script = "rss-watch.mjs";
   } else if (run.action === "review") {
@@ -82,18 +137,21 @@ function spawnRun(run) {
     script = "social.mjs";
   }
 
-  // Common settings
-  args.push("--non-interactive");
-  if (s.model && s.model !== "gemma4:e4b") { args.push("--model", s.model); }
-  if (s.format && s.format !== "article") { args.push("--format", s.format); }
-  if (s.persona && s.persona !== "journalist") { args.push("--persona", s.persona); }
-  if (s.tone && s.tone !== "casual") { args.push("--tone", s.tone); }
-  if (s.lang && s.lang !== "pl") { args.push("--lang", s.lang); }
+  // Common settings (per-article overrides take priority over global)
+  if (script) args.push("--non-interactive");
+  const fmt = body.format || s.format;
+  const per = body.persona || s.persona;
+  const to = body.tone || s.tone;
+  const lng = body.lang || s.lang;
+  if (fmt && fmt !== "article") { args.push("--format", fmt); }
+  if (per && per !== "journalist") { args.push("--persona", per); }
+  if (to && to !== "casual") { args.push("--tone", to); }
+  if (lng && lng !== "pl") { args.push("--lang", lng); }
   if (s.queries > 0) { args.push("--queries", String(s.queries)); }
 
   // Push flag (default: on for generate/rss)
   const push = body.push !== undefined ? body.push : true;
-  if (push) args.push("--push");
+  if (push && script) args.push("--push");
 
   // Auto-watch specific
   if (run.action === "auto-watch") {
@@ -101,6 +159,24 @@ function spawnRun(run) {
     if (s._newsletter) args.push("--newsletter");
     if (s._verbose) args.push("--verbose");
   }
+
+  // handle process-queue: spawn multiple generate runs in sequence
+  if (run.action === "process-queue") {
+    const q = readJSON(TOPICS_PATH) || [];
+    const pending = q.filter(t => t.status === "pending");
+    if (!pending.length) {
+      run.done = { done: true, success: false, error: "Brak pending tematów" };
+      return;
+    }
+    run._queueIndex = 0;
+    run._queueItems = pending;
+    run._queueTotal = pending.length;
+    run.buf = `Przetwarzanie ${pending.length} tematów...\n`;
+    spawnQueueItem(run, s, body, args);
+    return;
+  }
+
+  if (!script) { run.done = { done: true, success: false, error: "unknown action" }; return; }
 
   const child = spawn(process.execPath, [script, ...args], { cwd: ROOT });
   run.proc = child;
@@ -118,6 +194,12 @@ function spawnRun(run) {
     const doneMsg = { done: true, success: ok, error: ok ? null : "exit code " + code, output: run.buf };
     if (run.res) sendSSE(run.res, doneMsg);
     run.done = doneMsg;
+    // Mark topic as done after single-queue generation
+    if (run._topicId && ok) {
+      const q = readJSON(TOPICS_PATH) || [];
+      const t = q.find(t => t.id === run._topicId);
+      if (t) { t.status = "done"; writeFileSync(TOPICS_PATH, JSON.stringify(q, null, 2)); }
+    }
     setTimeout(() => runs.delete(run.id), 60000);
   });
   child.on("error", e => {
@@ -125,6 +207,57 @@ function spawnRun(run) {
     if (run.res) sendSSE(run.res, { type: "error", data: e.message });
     if (run.res) sendSSE(run.res, errMsg);
     run.done = errMsg;
+  });
+}
+
+function spawnQueueItem(run, s, body, baseArgs) {
+  if (run._queueIndex >= run._queueItems.length) {
+    const doneMsg = { done: true, success: true, output: run.buf + `\n✅ Przetworzono ${run._queueTotal} tematów\n` };
+    if (run.res) sendSSE(run.res, doneMsg);
+    run.done = doneMsg;
+    setTimeout(() => runs.delete(run.id), 60000);
+    return;
+  }
+  const item = run._queueItems[run._queueIndex];
+  run._queueIndex++;
+  const preview = item.title.slice(0, 60);
+  run.buf += `[${run._queueIndex}/${run._queueTotal}] ${preview}\n`;
+  if (run.res) sendSSE(run.res, { type: "stdout", data: `[${run._queueIndex}/${run._queueTotal}] ${preview}\n`, full: run.buf });
+
+  const fmt = body.format || s.format;
+  const per = body.persona || s.persona;
+  const to = body.tone || s.tone;
+  const lng = body.lang || s.lang;
+  const sArgs = [item.title, "--non-interactive"];
+  if (item.url) sArgs.push("--url", item.url);
+  if (fmt && fmt !== "article") sArgs.push("--format", fmt);
+  if (per && per !== "journalist") sArgs.push("--persona", per);
+  if (to && to !== "casual") sArgs.push("--tone", to);
+  if (lng && lng !== "pl") sArgs.push("--lang", lng);
+  if (body.push !== false) sArgs.push("--push");
+
+  const child = spawn(process.execPath, ["generate.mjs", ...sArgs], { cwd: ROOT });
+  child.stdout.on("data", d => {
+    run.buf += d.toString();
+    if (run.res) sendSSE(run.res, { type: "stdout", data: d.toString(), full: run.buf });
+  });
+  child.stderr.on("data", d => {
+    run.buf += d.toString();
+    if (run.res) sendSSE(run.res, { type: "stderr", data: d.toString(), full: run.buf });
+  });
+  child.on("exit", code => {
+    const ok = code === 0;
+    if (ok) {
+      const q = readJSON(TOPICS_PATH) || [];
+      const t = q.find(t => t.id === item.id);
+      if (t) { t.status = "done"; writeFileSync(TOPICS_PATH, JSON.stringify(q, null, 2)); }
+    }
+    run.buf += `  ${ok ? '✅' : '❌'} ${ok ? 'OK' : 'exit '+code}\n`;
+    spawnQueueItem(run, s, body, baseArgs);
+  });
+  child.on("error", e => {
+    run.buf += `  ❌ ${e.message}\n`;
+    spawnQueueItem(run, s, body, baseArgs);
   });
 }
 
@@ -254,7 +387,7 @@ const server = createServer((req, res) => {
   // POST /api/run/:action
   if (m === "POST" && p !== "/api/run/nb" && /^\/api\/run\/[a-z][a-z-]+$/.test(p)) {
     const action = p.replace("/api/run/", "");
-    const VALID = ["generate","rss","auto-watch","review","analyze","newsletter","social"];
+    const VALID = ["generate","rss","auto-watch","review","analyze","newsletter","social","generate-from-queue","generate-from-research","generate-from-gap","process-queue","regenerate-index"];
     if (!VALID.includes(action)) { json(res, { ok: false, error: "unknown action" }, 400); return; }
     let body = "";
     req.on("data", c => body += c);
