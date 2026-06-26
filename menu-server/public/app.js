@@ -38,7 +38,6 @@
   let settingsCache = {};
   let modelsList = [];
   let running = null; // { es, runId, tileAction, output, _progressTimer }
-  let eventSource = null; // status SSE
   let jobHistory = []; // [{ action, label, status, time, output }]
   let nbAuthed = false; // NotebookLM auth state
 
@@ -74,7 +73,6 @@
     if (navStack.length > 1) { navStack.pop(); render(); }
   }
   function currentLevel() { return navStack[navStack.length - 1]; }
-  function parentLevel() { return navStack.length > 1 ? navStack[navStack.length - 2] : null; }
 
   // ===========================
   // Breadcrumb labels
@@ -86,7 +84,7 @@
     'auto-watch': { title: 'Auto-watch', sub: 'Automatyczny monitoring' },
     review: { title: 'Przegląd', sub: 'Przegląd i korekta' },
     analyze: { title: 'Analiza', sub: 'Analiza treści' },
-    newsletter: { title: 'Newsletter', sub: 'Generowanie newslettera' },
+    newsletter: { title: 'Publikuj i analizuj', sub: 'Newsletter · NotebookLM · Analiza · Git' },
     settings: { title: 'Ustawienia', sub: 'Konfiguracja' },
     telemetry: { title: 'Telemetria', sub: 'Statystyki i dane' },
     notebooklm: { title: 'NotebookLM', sub: 'Studio NotebookLM' },
@@ -242,6 +240,7 @@
   }
 
   function renderTiles(tiles, onTileClick) {
+    tilesEl.style.display = 'grid';
     tilesEl.innerHTML = tiles.map((t, i) => createTileHtml(t, i)).join('');
     // stagger reveal
     requestAnimationFrame(() => {
@@ -344,34 +343,141 @@
   }
 
   // ===========================
-  // Article browsing (Problem #2)
+  // Article browsing — rich cards, content-first
   // ===========================
+  const FMT_BADGE = {
+    article:   { color:'var(--green)',  bg:'var(--green-glow)',      label:'Standard' },
+    list:      { color:'var(--amber)',  bg:'rgba(245,158,11,.15)',    label:'Top lista' },
+    howto:     { color:'var(--blue)',   bg:'rgba(59,130,246,.15)',    label:'Poradnik' },
+    explainer: { color:'var(--cyan)',   bg:'var(--cyan-glow)',        label:'Czym jest' },
+    vs:        { color:'var(--purple)', bg:'rgba(139,92,246,.15)',    label:'Porównanie' },
+    myth:      { color:'var(--pink)',   bg:'rgba(236,72,153,.15)',    label:'Mit/fakt' },
+    faq:       { color:'var(--indigo)', bg:'rgba(99,102,241,.15)',    label:'FAQ' },
+    digest:    { color:'var(--cyan)',   bg:'var(--cyan-glow)',        label:'Przegląd' },
+    opinion:   { color:'var(--pink)',   bg:'rgba(236,72,153,.15)',    label:'Opinia' },
+  };
+
+  function relativeTime(dateStr) {
+    if (!dateStr) return '';
+    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    if (diff < 60) return 'przed chwilą';
+    if (diff < 3600) return Math.floor(diff / 60) + ' min temu';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' godz temu';
+    if (diff < 172800) return 'wczoraj';
+    if (diff < 604800) return Math.floor(diff / 86400) + ' dni temu';
+    return new Date(dateStr).toLocaleDateString('pl-PL', {day:'numeric',month:'short'});
+  }
+
   async function renderArticles() {
+    tilesEl.style.display = 'block';
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📄</div><div class="result-title">Artykuły</div><div class="result-desc">Ładowanie...</div></div>';
     let data;
     try { const r = await fetch('/api/articles'); data = await r.json(); } catch { data = { articles: [], error: 'Błąd sieci' }; }
     const articles = data.articles || [];
-    const tiles = [];
-    tiles.push({ type:'config', icon:'📊', label:'Łącznie artykułów', desc: String(data.total || 0) });
+    window._articlesData = articles;
+
+    let html = '<div class="articles-browser">';
+
+    // Header + search + filters
+    html += '<div class="art-header-bar">';
+    html += '<div class="art-header-left"><span style="font-size:1.1rem">📄</span><strong>Artykuły</strong><span style="font-size:.72rem;color:var(--text-muted)">' + (data.total || 0) + '</span></div>';
+    html += '<div class="art-header-right">';
+    html += '<input class="art-search" id="artSearch" placeholder="Szukaj tytułu, fragmentu..." autocomplete="off">';
+    html += '</div>';
+    html += '</div>';
+
+    // Format filter chips
+    html += '<div class="art-filters" id="artFilters">';
+    html += '<button class="art-filter-chip active" data-fmt="all">Wszystkie</button>';
+    const usedFormats = new Set(articles.map(a => a.format || 'article'));
+    usedFormats.forEach(fmt => {
+      const badge = FMT_BADGE[fmt] || FMT_BADGE.article;
+      html += '<button class="art-filter-chip" data-fmt="' + esc(fmt) + '" style="--chip-color:' + badge.color + ';--chip-bg:' + badge.bg + '">' + badge.label + '</button>';
+    });
+    html += '</div>';
+
     if (articles.length === 0) {
-      tiles.push({ type:'config', icon:'📭', label:'Brak artykułów', desc:'Wygeneruj pierwszy artykuł przez "Generuj z tematu"' });
+      html += '<div class="art-empty">';
+      html += '<div class="art-empty-icon">📭</div>';
+      html += '<div class="art-empty-title">Brak wygenerowanych artykułów</div>';
+      html += '<div class="art-empty-desc">Przejdź do <span class="art-empty-link" onclick="document.querySelector(\'.sidebar-action[data-action=home]\').click()">Dashboard → Generuj treści</span> i wygeneruj pierwszy artykuł. Tutaj zobaczysz podgląd każdej treści — tytuł, fragment tekstu, format i metadane.</div>';
+      html += '</div>';
     } else {
-      articles.slice(0, 50).forEach(a => {
-        const d = a.date ? new Date(a.date).toLocaleDateString('pl-PL', {day:'numeric',month:'short',year:'numeric'}) : '';
-        const words = a.words ? `${a.words} słów` : '';
-        const format = a.format && a.format !== 'article' ? ` · ${a.format}` : '';
-        const desc = [d, words, a.source ? `źródło: ${a.source}` : ''].filter(Boolean).join(' · ');
-        tiles.push({ type:'config', icon:'📝', label: a.title || a.slug, desc: desc + format, articleSlug: a.slug, articleFile: a.file });
+      html += '<div class="art-cards" id="artCards">';
+      articles.forEach(a => {
+        const badge = FMT_BADGE[a.format] || FMT_BADGE.article;
+        const rtime = relativeTime(a.date);
+        const snippet = a.snippet || '';
+        const words = a.words ? a.words + ' słów' : '';
+        const source = a.source || '';
+        html += '<div class="art-card" data-slug="' + esc(a.slug) + '" data-fmt="' + esc(a.format || 'article') + '" data-title="' + esc(a.title) + '" data-file="' + esc(a.file || '') + '" onclick="if(!event.target.closest(\'a,button,.art-card-actions *\')){const d=this.dataset;window._showArticlePreview(d.slug,d.file,d.title,\'\')}">';
+        // Format badge
+        html += '<div class="art-card-top">';
+        html += '<span class="art-format-badge" style="color:' + badge.color + ';background:' + badge.bg + '">' + badge.label + '</span>';
+        html += '<span class="art-card-time">' + (rtime || '—') + '</span>';
+        html += '</div>';
+        // Title
+        html += '<div class="art-card-title">' + esc(a.title || a.slug) + '</div>';
+        // Snippet
+        if (snippet) {
+          html += '<div class="art-card-snippet">' + esc(snippet) + (snippet.length >= 280 ? '…' : '') + '</div>';
+        }
+        // Meta row
+        html += '<div class="art-card-meta">';
+        if (words) html += '<span>' + words + '</span>';
+        if (source) html += '<span title="' + esc(source) + '">' + esc(source).slice(0, 50) + '</span>';
+        html += '</div>';
+        // Actions
+        html += '<div class="art-card-actions">';
+        html += '<a class="art-action-btn" href="/articles/' + esc(a.slug) + '.html" target="_blank" title="Otwórz">📎 Otwórz</a>';
+        html += '<button class="art-action-btn" onclick="event.stopPropagation();navigator.clipboard.writeText(location.origin+\'/articles/' + esc(a.slug) + '.html\');window._showToast && window._showToast(\'Skopiowano link\',\'\')" title="Kopiuj link">🔗 Kopiuj</button>';
+        html += '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    html += '<div style="margin-top:20px;text-align:center"><button class="result-btn" id="articlesBackBtn">←  Powrót</button></div>';
+    html += '</div>';
+    tilesEl.innerHTML = html;
+
+    // Event wiring
+    document.getElementById('articlesBackBtn').addEventListener('click', () => popLevel());
+
+    // Search
+    const searchEl = document.getElementById('artSearch');
+    if (searchEl) {
+      searchEl.addEventListener('input', () => {
+        applyArticleFilters();
       });
     }
-    tiles.push({ type:'back' });
-    renderTiles(tiles, (t, el) => {
-      if (t.type === 'back') { popLevel(); return; }
-      if (t.type === 'section') return;
-      if (t.articleSlug) {
-        showArticlePreview(t.articleSlug, t.articleFile, t.label, t.desc);
-      }
+
+    // Format filters
+    document.querySelectorAll('.art-filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('.art-filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        applyArticleFilters();
+      });
     });
+
+    // Expose for inline onclick
+    window._showArticlePreview = showArticlePreview;
+    window._showToast = showToast;
+  }
+
+  function applyArticleFilters() {
+    const search = (document.getElementById('artSearch')?.value || '').toLowerCase();
+    const activeFmt = document.querySelector('.art-filter-chip.active')?.dataset.fmt || 'all';
+    document.querySelectorAll('.art-card').forEach(card => {
+      const fmt = card.dataset.fmt;
+      const title = (card.dataset.title || '').toLowerCase();
+      const snippet = (card.querySelector('.art-card-snippet')?.textContent || '').toLowerCase();
+      const fmtMatch = activeFmt === 'all' || fmt === activeFmt;
+      const searchMatch = !search || title.includes(search) || snippet.includes(search);
+      card.style.display = fmtMatch && searchMatch ? '' : 'none';
+    });
+    const visible = document.querySelectorAll('.art-card[style=""]').length || document.querySelectorAll('.art-card:not([style*="display: none"])').length;
   }
 
   function showArticlePreview(slug, file, title, desc) {
@@ -402,7 +508,7 @@
         { type:'action', icon:'📋', label:'Z kolejki tematów', desc:'Weź następny pending z kolejki i wygeneruj artykuł', action:'generate-from-queue' },
         { type:'action', icon:'📡', label:'Z RSS (wybierz feed)', desc:'Wybierz feed z 42 kuratorowanych kanałów RSS', action:'rss-pick' },
         { type:'action', icon:'🔬', label:'Z NB Research', desc:'Artykuł na podstawie źródeł z ostatniego researchu', action:'generate-from-research' },
-        { type:'action', icon:'🎯', label:'Z luk tematycznych', desc:'Generuj artykuł na niewypełnioną lukę w SEO', action:'generate-from-gap' },
+        { type:'action', icon:'🎯', label:'Z luk tematycznych', desc:'Weź pierwszą niewypełnioną lukę z gap-report.json i wygeneruj artykuł', action:'generate-from-gap' },
         { type:'action', icon:'💬', label:'Z własnego promptu', desc:'Wpisz temat — AI napisze artykuł', action:'generate', needsInput:true, inputLabel:'Temat artykułu', inputPlaceholder:'np. Jak zacząć dropshipping B2B...' },
 
         // ── Group B: Batch ──
@@ -418,7 +524,7 @@
         { type:'action', icon:'🔍', label:'Przeglądaj RSS', desc:'Wczytaj feed, przeglądaj nagłówki, dodaj do kolejki tematów', gotoLevel:{ level:'rss-feed-picker' } },
         { type:'action', icon:'📋', label:'Kolejka tematów', desc:'Lista zapisanych tematów gotowych do opracowania', gotoLevel:{ level:'topic-queue' } },
         { type:'action', icon:'➕', label:'Dodaj temat', desc:'Ręcznie dodaj URL/tytuł do kolejki', action:'add-topic', needsInput:true, inputLabel:'URL lub tytuł tematu', inputPlaceholder:'Wklej URL lub wpisz tytuł...' },
-        { type:'action', icon:'📰', label:'NB Digest', desc:'Podsumowanie + raport z News NotebookLM', action:'nb-digest' },
+        { type:'action', icon:'📰', label:'NB Digest', desc:'Podsumowanie NotebookLM News — streszczenie wszystkich źródeł', action:'nb-digest' },
         { type:'action', icon:'🔬', label:'NB Web Research', desc:'Research z query — deep mode przez NotebookLM', action:'nb-web-research' },
         { type:'nav', icon:'📡', label:'Auto-watch', desc:'Monitoruj wszystkie feedy automatycznie', gotoLevel:{ level:'auto-watch' } },
       ],
@@ -437,10 +543,17 @@
         { type:'nav', icon:'🔢', label:'Tokeny i zużycie', desc:'Statystyki użycia', gotoLevel:{ level:'token-usage' } },
       ],
       newsletter: [
-        { type:'action', icon:'📧', label:'Generuj newsletter', desc:'Wygeneruj newsletter tygodniowy', action:'newsletter' },
-        { type:'action', icon:'📤', label:'Wyślij newsletter', desc:'Wyślij newsletter do subskrybentów', action:'newsletter' },
+        { type:'section', icon:'📧', label:'Newsletter' },
+        { type:'action', icon:'📝', label:'Generuj HTML newslettera', desc:'Wygeneruj plik HTML newslettera tygodniowego', action:'newsletter' },
+        { type:'config', icon:'📤', label:'Wysyłka newslettera', desc:'Funkcja w przygotowaniu — backend SMTP nie jest skonfigurowany' },
+        { type:'section', icon:'🎙️', label:'NotebookLM — Publikacja' },
         { type:'action', icon:'🎙️', label:'NB Audio Briefing', desc:'Briefing audio przez NotebookLM', gotoLevel:{ level:'nb-category', notebookKey:'audio' } },
         { type:'action', icon:'🎬', label:'NB Studio', desc:'Generuj audio/wideo/report', gotoLevel:{ level:'nb-studio' } },
+        { type:'section', icon:'📊', label:'Analiza i monitoring' },
+        { type:'action', icon:'🏁', label:'Konkurencja', desc:'Lista konkurencji', gotoLevel:{ level:'competitors' } },
+        { type:'action', icon:'🔍', label:'Luki tematyczne', desc:'Analiza luk', gotoLevel:{ level:'gaps' } },
+        { type:'nav', icon:'📈', label:'Podsumowanie analizy', desc:'Metryki i statystyki', gotoLevel:{ level:'analyze-summary' } },
+        { type:'nav', icon:'🔀', label:'Git / Deploy', desc:'Status repozytorium, commity', gotoLevel:{ level:'git-status' } },
       ],
     };
     const tiles = [...(defs[level] || [])];
@@ -456,6 +569,7 @@
   // RSS feed picker — curated list of feeds + custom URL
   // ===========================
   async function renderRssFeedPicker() {
+    tilesEl.style.display = 'block';
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📡</div><div class="result-title">Kanały RSS</div><div class="result-desc">Ładowanie...</div></div>';
     try {
       const resp = await fetch('/api/feeds');
@@ -522,6 +636,7 @@
   }
 
   async function renderRssBrowse(lvl) {
+    tilesEl.style.display = 'block';
     const feedUrl = lvl.data && lvl.data.url;
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">🔍</div><div class="result-title">Wczytywanie feeda...</div><div class="result-desc">' + esc(feedUrl) + '</div></div>';
     try {
@@ -594,6 +709,7 @@
   // Feed picker for generation mode — click feed → generate article
   // ===========================
   async function renderRssFeedPickerGen() {
+    tilesEl.style.display = 'block';
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📡</div><div class="result-title">Generuj z RSS</div><div class="result-desc">Ładowanie feedów...</div></div>';
     try {
       const resp = await fetch('/api/feeds');
@@ -630,8 +746,9 @@
               try {
                 const m = JSON.parse(e.data);
                 if (m.type==='connected') return;
-                if (m.done) { es.close(); el.classList.remove('running'); if(running&&running._progressTimer) clearInterval(running._progressTimer); addJobToQueue('RSS: '+el.dataset.name, m.error?'error':'done', m.output); running=null; navStack=navStack.filter(l=>l.level!=='progress'); pushLevel({level:'result',data:{success:!m.error,error:m.error,action:'rss',output:m.output||''}}); return; }
-                if (m.data) { running.output=(running.output||'')+m.data; if(currentLevel().level==='progress') renderProgressLive(running.output); }
+                if (m.done) { es.close(); el.classList.remove('running'); if(running&&running._progressTimer) clearInterval(running._progressTimer); if(running&&running._escHandler) document.removeEventListener('keydown', running._escHandler); addJobToQueue('RSS: '+el.dataset.name, m.error?'error':'done', m.output); running=null; navStack=navStack.filter(l=>l.level!=='progress'); var gr3 = window._genResult; window._genResult = null; pushLevel({level:'result',data:{success:!m.error,error:m.error,action:'rss',output:m.output||'',genResult:gr3||null}}); return; }
+                if (m.type==='event' && m.event) { if(currentLevel().level==='progress') renderProgressLive(m.event); }
+                else if (m.data) { running.output=(running.output||'')+m.data; if(currentLevel().level==='progress') renderProgressLive(running.output); }
               } catch {}
             };
             es.onerror = () => { es.close(); showToast('Utracono połączenie','err'); el.classList.remove('running'); if(running&&running._progressTimer) clearInterval(running._progressTimer); running=null; navStack=navStack.filter(l=>l.level!=='progress'); render(); };
@@ -643,6 +760,7 @@
 
   // ===========================
   async function renderTopicQueue() {
+    tilesEl.style.display = 'block';
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📋</div><div class="result-title">Kolejka tematów</div><div class="result-desc">Ładowanie...</div></div>';
     try {
       const resp = await fetch('/api/topics');
@@ -654,21 +772,22 @@
       }
       const pending = topics.filter(t => t.status === 'pending').length;
       const done = topics.filter(t => t.status === 'done').length;
-      let html = '<div style="max-width:640px;margin:0 auto">';
+      let html = '<div>';
       html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span style="font-size:1.2rem">📋</span><strong>Kolejka tematów</strong><span style="font-size:.75rem;color:var(--text-muted)">(' + pending + ' oczekujących, ' + done + ' gotowych)</span></div>';
       topics.forEach((topic) => {
         const date = topic.date ? new Date(topic.date).toLocaleDateString('pl-PL') : '';
         const isDone = topic.status === 'done';
-        html += '<div class="topic-item" data-id="' + topic.id + '" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;opacity:' + (isDone ? '.55' : '1') + '">';
-        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">';
-        html += '<div style="flex:1;min-width:0"><div style="font-size:.8rem;font-weight:600;line-height:1.3">' + (isDone ? '✅ ' : '⏳ ') + esc(topic.title) + '</div>';
-        html += '<div style="font-size:.68rem;color:var(--text-muted);margin-top:2px">' + esc(topic.source || '—') + (date ? ' · ' + date : '') + '</div>';
-        if (topic.url) html += '<div style="font-size:.68rem;margin-top:2px"><a href="' + esc(topic.url) + '" target="_blank" style="color:var(--accent)">' + esc(topic.url).slice(0, 60) + '</a></div>';
+        html += '<div class="topic-item" data-id="' + topic.id + '" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:6px;display:grid;grid-template-columns:30px 1fr 160px 100px 60px;gap:8px;align-items:center;opacity:' + (isDone ? '.55' : '1') + '">';
+        html += '<span style="font-size:.9rem;text-align:center">' + (isDone ? '✅' : '⏳') + '</span>';
+        html += '<div style="min-width:0"><div style="font-size:.8rem;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(topic.title) + '</div>';
+        if (topic.url) html += '<div style="font-size:.68rem;margin-top:2px"><a href="' + esc(topic.url) + '" target="_blank" style="color:var(--accent)">' + esc(topic.url).slice(0, 50) + '</a></div>';
         html += '</div>';
-        html += '<div style="display:flex;gap:4px;flex-shrink:0">';
-        if (!isDone) html += '<button class="result-btn topic-done-btn" data-id="' + topic.id + '" style="font-size:.72rem;padding:4px 8px">✅</button>';
-        html += '<button class="result-btn topic-del-btn" data-id="' + topic.id + '" style="font-size:.72rem;padding:4px 8px">🗑</button>';
-        html += '</div></div></div>';
+        html += '<span style="font-size:.7rem;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(topic.source || '—') + '</span>';
+        html += '<span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap">' + date + '</span>';
+        html += '<div style="display:flex;gap:3px">';
+        if (!isDone) html += '<button class="result-btn topic-done-btn" data-id="' + topic.id + '" style="font-size:.68rem;padding:3px 6px">✅</button>';
+        html += '<button class="result-btn topic-del-btn" data-id="' + topic.id + '" style="font-size:.68rem;padding:3px 6px">🗑</button>';
+        html += '</div></div>';
       });
       html += '<div style="margin-top:16px;text-align:center"><button class="result-btn" id="topicBackBtn">←  Powrót</button></div>';
       html += '</div>';
@@ -705,6 +824,7 @@
   // Research history — saved research outputs
   // ===========================
   async function renderResearchHistory() {
+    tilesEl.style.display = 'block';
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📜</div><div class="result-title">Historia researchu</div><div class="result-desc">Ładowanie...</div></div>';
     try {
       const resp = await fetch('/api/research-results');
@@ -748,6 +868,7 @@
   // Sources DB — all research links with categories
   // ===========================
   async function renderSourcesDB() {
+    tilesEl.style.display = 'block';
     tilesEl.innerHTML = '<div class="result-card"><div class="result-icon">📚</div><div class="result-title">Baza źródeł</div><div class="result-desc">Ładowanie...</div></div>';
     try {
       const resp = await fetch('/api/research-sources');
@@ -955,11 +1076,11 @@
 
   function renderNbStudio() {
     const tiles = [
-      { type:'action', icon:'📝', label:'Generate Report', desc:'Raport blog-post z notebooka', nbAction:'studio-report' },
-      { type:'action', icon:'🎙️', label:'Generate Audio', desc:'Podcast deep-dive z notebooka', nbAction:'studio-audio' },
-      { type:'action', icon:'🎬', label:'Generate Video', desc:'Film z notebooka', nbAction:'studio-video' },
+      { type:'action', icon:'📝', label:'Generate Report', desc:'Raport blog-post z notebooka (format: blog-post)', nbAction:'studio-report' },
+      { type:'action', icon:'🎙️', label:'Generate Audio', desc:'Podcast deep-dive z notebooka (format: deep-dive)', nbAction:'studio-audio' },
+      { type:'action', icon:'🎬', label:'Generate Video', desc:'Briefing video z notebooka (format: briefing-doc)', nbAction:'studio-video' },
       { type:'action', icon:'⬇️', label:'Downloads', desc:'Pobierz artifacty z notebooka', nbAction:'studio-downloads' },
-      { type:'nav', icon:'📰', label:'News Digest', desc:'Notebook News Digest', gotoLevel:{ level:'nb-category', notebookKey:'news' } },
+      { type:'nav', icon:'📰', label:'News Digest', desc:'Podsumowanie NotebookLM News — streszczenie wszystkich źródeł', gotoLevel:{ level:'nb-category', notebookKey:'news' } },
     ];
     tiles.push({ type:'back' });
     renderTiles(tiles, (t, el) => {
@@ -1282,7 +1403,7 @@
       { type:'action', icon:'📦', label:'Wszystkie artifacty', desc:'Lista wszystkich artifactów NB', downloadAction:'list-all' },
       { type:'back' },
     ];
-    renderTiles(async (t, el) => {
+    renderTiles(tiles, async (t, el) => {
       if (t.type === 'back') { popLevel(); return; }
       if (t.gotoLevel) { pushLevel(t.gotoLevel); return; }
       if (t.downloadAction === 'list-all') {
@@ -1331,7 +1452,7 @@
       tiles.push({ type:'choice', icon: defNb === k ? '◉' : '○', label: NB_NOTEBOOKS[k].title, value: k, selected: defNb === k, nbCfgKey:'defaultNotebook', nbCfgVal: k });
     });
     tiles.push({ type:'back' });
-    renderTiles(async (t, el) => {
+    renderTiles(tiles, async (t, el) => {
       if (t.type === 'back') { popLevel(); return; }
       if (t.nbCfgKey) {
         if (t.nbCfgKey === 'autoPushSources' || t.nbCfgKey === 'autoGenerateReport') {
@@ -1401,7 +1522,7 @@
     });
     tiles.push({ type:'action', icon:'🔄', label:'Git push', desc:'Wypchnij zmiany na GitHub', gitAction:'push' });
     tiles.push({ type:'back' });
-    renderTiles(async (t, el) => {
+    renderTiles(tiles, async (t, el) => {
       if (t.type === 'back') { popLevel(); return; }
       if (t.gitAction === 'push') {
         el.classList.add('running');
@@ -1662,7 +1783,56 @@
       return;
     }
 
-    // ── Article generation: original behavior ──
+    // ── Article generation: check for structured genResult first ──
+    var genResult = data.genResult;
+    if (genResult && genResult.title) {
+      var grTitle = genResult.title || '';
+      var grSlug = genResult.slug || '';
+      var grWords = String(genResult.words || 0);
+      var grTime = String(genResult.time || '');
+      var grReadability = genResult.readability || '';
+      var grFile = genResult.file || '';
+      var grUrl = genResult.url || '';
+      var grModel = genResult.model || 'gemma4:e4b';
+      var grSizeKB = genResult.sizeKB || '';
+      var grH2 = String(genResult.h2count || 0);
+
+      var grPreview = grTitle + '\n' + grWords + ' słów · ' + grReadability + ' · ' + grTime + 's';
+
+      tilesEl.innerHTML = '' +
+        '<div class="result-card">' +
+          '<div class="result-icon ok">✔️</div>' +
+          '<div class="result-title">Artykuł wygenerowany</div>' +
+          '<div class="result-desc">' + esc(grTitle.slice(0, 80)) + '</div>' +
+          '<div class="article-preview">' +
+            '<div class="article-preview-title">' + esc(grTitle) + '</div>' +
+            '<div class="article-preview-meta">' +
+              '<span>📝 ' + grWords + ' słów</span>' +
+              '<span>📖 ' + grReadability + '</span>' +
+              '<span>📏 ' + grSizeKB + ' KB</span>' +
+              '<span>🤖 ' + esc(grModel) + '</span>' +
+              '<span>⏱ ' + grTime + 's</span>' +
+            '</div>' +
+            '<div class="article-preview-slug">articles/' + esc(grSlug) + '.html</div>' +
+            (grFile ? '<a class="result-link" href="/' + esc(grFile).replace(/\\/g,"/") + '" target="_blank">📎 Otwórz artykuł</a>' : '') +
+          '</div>' +
+          '<div style="display:flex;gap:8px;justify-content:center;margin-top:1rem;flex-wrap:wrap">' +
+            (grFile ? '<a class="result-link" href="/' + esc(grFile).replace(/\\/g,"/") + '" target="_blank">📎 Otwórz artykuł</a>' : '') +
+            '<button class="result-btn" id="resultBack">🔄 Generuj kolejny</button>' +
+            '<button class="result-btn" id="resultBack2">↩ Powrót</button>' +
+          '</div>' +
+        '</div>';
+      var backBtn = document.getElementById('resultBack');
+      var backBtn2 = document.getElementById('resultBack2');
+      if (backBtn) backBtn.addEventListener('click', function() {
+        if (navStack.length > 2) { navStack = navStack.slice(0, navStack.length - 2); render(); }
+        else popLevel();
+      });
+      if (backBtn2) backBtn2.addEventListener('click', popLevel);
+      return;
+    }
+
+    // ── Article generation: legacy behavior (extract from text) ──
     const title = cancelled ? 'Przerwano' : success ? 'Artykuł wygenerowany' : 'Błąd';
     const hasFile = data.file && !cancelled;
 
@@ -1722,8 +1892,8 @@
           ${actionButtons}
         </div>
       </div>`;
-    const backBtn = document.getElementById('resultBack');
-    const backBtn2 = document.getElementById('resultBack2');
+    backBtn = document.getElementById('resultBack');
+    var backBtn2 = document.getElementById('resultBack2');
     if (backBtn) backBtn.addEventListener('click', () => {
       // Go back two levels: result → action level
       if (navStack.length > 2) { navStack = navStack.slice(0, navStack.length - 2); render(); }
@@ -1742,6 +1912,7 @@
   // Live Progress view (Penpot 8-step design)
   // ===========================
   function renderProgress(data) {
+    tilesEl.style.display = 'block';
     const label = data.label || '';
     const startTime = Date.now();
 
@@ -1774,158 +1945,197 @@
       return;
     }
 
-    const steps = [
-      { id:'loading', icon:'🔄', label:'Ładowanie modelu', desc:'gemma4:e4b (9GB) — ładuję do RAM...' },
-      { id:'warmup', icon:'⏳', label:'Warmup', desc:'Pierwsze zapytanie testowe do modelu' },
-      { id:'prompt', icon:'📝', label:'Prompt', desc:'Budowanie promptu SEO według formatu i persony' },
-      { id:'generating', icon:'✍️', label:'Generowanie', desc:'AI pisze artykuł — streaming tokenów' },
-      { id:'validate', icon:'✅', label:'Walidacja', desc:'Sprawdzanie JSON i poprawności treści' },
-      { id:'html', icon:'📄', label:'HTML', desc:'Budowanie dokumentu z Schema.org i Open Graph' },
-      { id:'save', icon:'💾', label:'Zapis', desc:'Zapis do articles/ + aktualizacja indeksu' },
-      { id:'deploy', icon:'🚀', label:'Deploy', desc:'Git push + Google Indexing + LinkedIn' },
+    // ── New article generation view ──
+    const phases = [
+      { id:'warmup', icon:'🔄', label:'Ładowanie modelu', desc:'gemma4:e4b ładuje się do RAM...' },
+      { id:'generating', icon:'✍️', label:'Pisanie artykułu', desc:'AI generuje treść — live preview poniżej' },
+      { id:'publish', icon:'🚀', label:'Publikacja', desc:'Zapis HTML, Git push, indeksacja' },
     ];
-    const stepsHtml = steps.map((s, i) => {
-      const isActive = i === 0 ? ' active' : '';
-      const connector = i < steps.length - 1 ? '<div class="progress-step-connector"></div>' : '';
-      return `<div class="progress-step${isActive}" data-step="${s.id}">
-        <div class="progress-step-dot">${i+1}</div>
-        ${connector}
-        <div class="progress-step-body">
-          <div class="progress-step-label">${s.icon} ${s.label}</div>
-          <div class="progress-step-desc">${s.desc}</div>
-        </div>
-      </div>`;
-    }).join('');
 
-    tilesEl.innerHTML = `
-      <div class="result-card" id="progressCard" style="padding:1.5rem 1rem;">
-        <div class="result-title" id="progressTitle">${label || 'Generowanie artykułu'}</div>
-        <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.8rem" id="progressTimer">⏱ 0s</div>
-        <div class="progress-steps">${stepsHtml}</div>
-        <div class="progress-bar-wrap">
-          <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressBar" style="width:2%"></div></div>
-        </div>
-        <div class="progress-two-col">
-          <div class="progress-output" id="progressOutput" style="max-height:300px">⌛  Ładowanie modelu...</div>
-          <div class="article-live-preview" id="articlePreview" style="display:none">
-            <div class="alp-title" id="alpTitle"></div>
-            <div class="alp-body" id="alpBody"></div>
-            <div class="alp-cursor"></div>
-          </div>
-        </div>
-        <div style="display:flex;gap:8px;justify-content:center;margin-top:.8rem">
-          <button class="result-btn" id="progressCancel">✕  Anuluj (Esc)</button>
-        </div>
-      </div>`;
-    // Initialize live preview state
-    window._alpText = '';
-    window._alpVisible = false;
-    // Auto-update elapsed time every second
-    const timerEl = document.getElementById('progressTimer');
-    const timerInterval = setInterval(() => {
-      if (!timerEl || !document.getElementById('progressCard')) { clearInterval(timerInterval); return; }
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      timerEl.textContent = `⏱ ${elapsed}s`;
+    tilesEl.innerHTML = '' +
+      '<div class="gen-wrap" id="genWrap">' +
+        '<div class="gen-config" id="genConfig">' +
+          '<span id="genFormat" class="gen-badge">—</span>' +
+          '<span id="genPersona" class="gen-badge gen-badge-dim">—</span>' +
+          '<span id="genModel" class="gen-badge gen-badge-model">—</span>' +
+        '</div>' +
+        '<div class="gen-title-line" id="genTitleLine" style="display:none">"<span id="genTopic"></span>"</div>' +
+        '<div class="gen-phases" id="genPhases">' +
+          phases.map(function(p,i) { return '' +
+            '<div class="gen-phase' + (i===0?' active':'') + '" data-phase="' + p.id + '">' +
+              '<div class="gen-phase-dot">' + (i+1) + '</div>' +
+              '<div class="gen-phase-label">' + p.icon + ' ' + p.label + '</div>' +
+              '<div class="gen-phase-desc">' + p.desc + '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>' +
+        '<div class="gen-bar-wrap"><div class="gen-bar-fill" id="genBar"></div></div>' +
+        '<div class="gen-status" id="genStatus">🔄 Ładowanie modelu do RAM...</div>' +
+        '<div class="gen-preview-wrap" id="genPreviewWrap">' +
+          '<div class="gen-preview-empty" id="genPreviewEmpty">Artykuł pojawi się tutaj w czasie rzeczywistym...</div>' +
+          '<div class="gen-preview-text" id="genPreviewText"></div>' +
+          '<span class="gen-cursor" id="genCursor">▌</span>' +
+        '</div>' +
+        '<div class="gen-metrics" id="genMetrics">' +
+          '<span id="genTimer">⏱ 0s</span>' +
+          '<span id="genWords" style="display:none">0 słów</span>' +
+        '</div>' +
+        '<button class="gen-cancel-btn" id="genCancel">✕ Anuluj (Esc)</button>' +
+      '</div>';
+
+    // Timer
+    var timerEl2 = document.getElementById('genTimer');
+    var timerInterval2 = setInterval(function() {
+      if (!timerEl2 || !document.getElementById('genWrap')) { clearInterval(timerInterval2); return; }
+      timerEl2.textContent = '⏱ ' + Math.floor((Date.now() - startTime) / 1000) + 's';
     }, 1000);
-    // Store for cleanup
-    if (running) running._progressTimer = timerInterval;
-    document.getElementById('progressCancel').addEventListener('click', () => {
+    if (running) running._progressTimer = timerInterval2;
+
+    document.getElementById('genCancel').addEventListener('click', function() {
       if (running) doCancel();
       popLevel();
     });
-    requestAnimationFrame(() => {
-      const el = document.getElementById('progressOutput');
-      if (el) el.scrollTop = el.scrollHeight;
-    });
+
+    // Esc key
+    var escHandler = function(e) { if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); if (running) doCancel(); popLevel(); } };
+    document.addEventListener('keydown', escHandler);
+    running._escHandler = escHandler;
+
+    window._genText = '';
+    window._genPreviewShown = false;
   }
 
-  function renderProgressLive(output) {
-    const outEl = document.getElementById('progressOutput');
-    if (!outEl) return;
-    const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+  function renderProgressLive(payload) {
+    // If it's raw text (legacy mode), try to extract events from it
+    if (typeof payload === 'string') {
+      var outEl = document.getElementById('progressOutput');
+      if (!outEl) return;
+      var clean = payload.replace(/\x1b\[[0-9;]*m/g, '');
+      outEl.textContent = clean || '⌛  Oczekiwanie...';
+      outEl.scrollTop = outEl.scrollHeight;
+      return;
+    }
+    // Structured events from JSON-output mode
+    handleGenEvent(payload);
+  }
 
-    // Detect [CHUNK] markers — divert to live article preview
-    if (clean.includes('[CHUNK]')) {
-      const lines = clean.split('\n');
-      let newText = '';
-      for (const l of lines) {
-        if (l.startsWith('[CHUNK] ')) { newText += l.slice(8); }
+  function handleGenEvent(evt) {
+    if (!evt || !evt.type) return;
+
+    if (evt.type === 'meta') {
+      var fmtEl = document.getElementById('genFormat');
+      var perEl = document.getElementById('genPersona');
+      var mdlEl = document.getElementById('genModel');
+      if (fmtEl) fmtEl.textContent = (FORMAT_OPTS[evt.format] || evt.format || '—').toUpperCase();
+      if (perEl) perEl.textContent = (PERSONA_OPTS[evt.persona] || evt.persona || '—');
+      if (mdlEl) mdlEl.textContent = evt.model || '—';
+      return;
+    }
+
+    if (evt.type === 'phase') {
+      var phaseMap = {
+        rss_fetch:'warmup', model_select:'warmup', dir_check:'warmup', prompt_build:'warmup',
+        warmup:'warmup', generating:'generating',
+        build_html:'publish', save_file:'publish', mark_gen:'publish', reindex:'publish',
+        nb_sync:'publish', publish:'publish', done:'publish',
+      };
+      var target = phaseMap[evt.phase] || 'warmup';
+      updateGenPhases(target);
+      // Phase transition messages
+      var statusEl = document.getElementById('genStatus');
+      var messages = {
+        warmup:'🔄 Ładowanie modelu do RAM...',
+        generating:'✍️ AI pisze artykuł...',
+        publish:'📦 Zapis i publikacja...',
+      };
+      if (statusEl) statusEl.textContent = messages[target] || evt.label || '';
+      if (target === 'generating') {
+        var bar = document.getElementById('genBar');
+        if (bar) bar.style.width = '50%';
       }
-      if (newText) {
-        window._alpText = (window._alpText || '') + newText;
-        const previewEl = document.getElementById('articlePreview');
-        const bodyEl = document.getElementById('alpBody');
-        if (previewEl && bodyEl) {
-          if (!window._alpVisible) { window._alpVisible = true; previewEl.style.display = 'block'; }
-          bodyEl.textContent = window._alpText;
-          bodyEl.scrollTop = bodyEl.scrollHeight;
-        }
-      }
-      // Also show tech log for non-chunk lines (step indicators)
-      const techLines = lines.filter(l => !l.startsWith('[CHUNK] ') && l.trim());
-      if (techLines.length) {
-        outEl.textContent = techLines.slice(-3).join('\n');
-        outEl.scrollTop = outEl.scrollHeight;
+      if (target === 'publish') {
+        var bar2 = document.getElementById('genBar');
+        if (bar2) bar2.style.width = '90%';
       }
       return;
     }
 
-    outEl.textContent = clean || '⌛  Oczekiwanie...';
-    outEl.scrollTop = outEl.scrollHeight;
+    if (evt.type === 'warmup_tick') {
+      var st = document.getElementById('genStatus');
+      if (st) st.textContent = '🔄 Ładowanie modelu do RAM... (' + evt.elapsed + 's)';
+      return;
+    }
 
-    // Skip step detection for NB operations (no progress bar)
-    const bar = document.getElementById('progressBar');
-    if (!bar) return;
+    if (evt.type === 'warmup_done') {
+      var st2 = document.getElementById('genStatus');
+      if (st2) st2.textContent = '✅ Model załadowany — rozpoczynam pisanie...';
+      updateGenPhases('generating');
+      var bar3 = document.getElementById('genBar');
+      if (bar3) bar3.style.width = '45%';
+      return;
+    }
 
-    // Detect which step is active based on output content
-    const activeStep = detectStep(clean);
-    updateProgressSteps(activeStep);
+    if (evt.type === 'token') {
+      window._genText = (window._genText || '') + (evt.text || '');
+      var previewText = document.getElementById('genPreviewText');
+      var previewEmpty = document.getElementById('genPreviewEmpty');
+      var cursor = document.getElementById('genCursor');
+      if (previewText) {
+        if (!window._genPreviewShown && window._genText.length > 20) {
+          window._genPreviewShown = true;
+          if (previewEmpty) previewEmpty.style.display = 'none';
+        }
+        previewText.textContent = window._genText;
+        previewText.scrollTop = previewText.scrollHeight;
+      }
+      if (cursor) cursor.style.display = 'inline';
+      // Estimate word count
+      var wc = window._genText.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+      var wordsEl = document.getElementById('genWords');
+      if (wordsEl && wc > 5) {
+        wordsEl.style.display = 'inline';
+        wordsEl.textContent = wc + ' słów';
+      }
+      return;
+    }
 
-    // Update progress bar
-    const steps=['loading','warmup','prompt','generating','validate','html','save','deploy'];
-    const idx = steps.indexOf(activeStep);
-    if (bar) bar.style.width = `${Math.max(2, ((idx+1)/steps.length)*100)}%`;
+    if (evt.type === 'info') {
+      var st3 = document.getElementById('genStatus');
+      if (st3 && evt.msg) {
+        if (evt.tag === 'git') st3.textContent = (evt.color === 'red' ? '❌ ' : '') + evt.msg;
+        else st3.textContent = evt.msg;
+      }
+      return;
+    }
 
-    // Update title based on step
-    const titleEl = document.getElementById('progressTitle');
-    if (titleEl) {
-      const titles = {
-        loading:'🔄 Ładowanie modelu do RAM...',
-        warmup:'⏳ Warmup — testowe zapytanie',
-        prompt:'📝 Budowanie promptu',
-        generating:'✍️ AI pisze artykuł...',
-        validate:'✅ Walidacja wyniku',
-        html:'📄 Budowanie HTML + SEO',
-        save:'💾 Zapis pliku',
-        deploy:'🚀 Git push + Deploy',
-      };
-      titleEl.textContent = titles[activeStep] || 'Generowanie artykułu';
+    if (evt.type === 'error') {
+      var st4 = document.getElementById('genStatus');
+      if (st4) st4.textContent = '❌ ' + (evt.msg || 'Błąd generowania');
+      return;
+    }
+
+    if (evt.type === 'done') {
+      // Stash for result view
+      if (evt.title) window._genResult = evt;
+      var bar4 = document.getElementById('genBar');
+      if (bar4) bar4.style.width = '100%';
+      updateGenPhases('publish');
+      var st5 = document.getElementById('genStatus');
+      if (st5) st5.textContent = '✅ Gotowe! ' + (evt.words || '') + ' słów · ' + (evt.readability || '');
+      var wordsEl2 = document.getElementById('genWords');
+      if (wordsEl2) { wordsEl2.style.display = 'inline'; wordsEl2.textContent = (evt.words || 0) + ' słów'; }
+      return;
     }
   }
 
-  function detectStep(text) {
-    if (!text) return 'loading';
-    if (text.includes('Warmup') || text.includes('ładuję model') || text.includes('ładuję')) return 'loading';
-    if (text.includes('Gotowe!') || text.includes('Warmup') && text.match(/[0-9]+\.[0-9]+s/)) return 'warmup';
-    if (text.includes('Prompt') && (text.includes('znaków') || text.includes('System:'))) return 'prompt';
-    if (text.includes('Generowanie') || text.includes('Wciąż generuję') || text.includes('pisze artykuł')) return 'generating';
-    if (text.includes('streamResponse') || text.includes('JSON') || text.includes('walidac')) return 'validate';
-    if (text.includes('HTML') || text.includes('Schema') || text.includes('buildHtml')) return 'html';
-    if (text.includes('Zapis') || text.includes('zapis') || text.includes('articles/')) return 'save';
-    if (text.includes('Push') || text.includes('push') || text.includes('Commit') || text.includes('Deploy') || text.includes('Indexing')) return 'deploy';
-    return 'loading';
-  }
-
-  function updateProgressSteps(activeId) {
-    const container = document.getElementById('progressCard');
-    if (!container) return;
-    const allSteps = container.querySelectorAll('.progress-step');
-    const ids = ['loading','warmup','prompt','generating','validate','html','save','deploy'];
-    const activeIdx = ids.indexOf(activeId);
-    allSteps.forEach((step, i) => {
-      step.classList.remove('active', 'done');
-      if (i < activeIdx) step.classList.add('done');
-      else if (i === activeIdx) step.classList.add('active');
+  function updateGenPhases(activeId) {
+    var all = document.querySelectorAll('.gen-phase');
+    var ids = ['warmup', 'generating', 'publish'];
+    var activeIdx = ids.indexOf(activeId);
+    all.forEach(function(el, i) {
+      el.classList.remove('active', 'done');
+      if (i < activeIdx) el.classList.add('done');
+      else if (i === activeIdx) el.classList.add('active');
     });
   }
 
@@ -1935,11 +2145,9 @@
   async function handleWarmup(el) {
     if (running) { showToast('Poczekaj na zakończenie zadania', 'err'); return; }
     el.classList.add('running');
-    running = { el, output: '' };
-    pushLevel({ level: 'progress', data: { action: 'warmup', label: 'Warmup Ollama' } });
+    showToast('🔥 Warmup — ładuję model do RAM...', '');
     
     const es = new EventSource('/api/warmup');
-    running.es = es;
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -1947,18 +2155,9 @@
         if (msg.done) {
           es.close();
           el.classList.remove('running');
-          if (running && running._progressTimer) clearInterval(running._progressTimer);
-          running = null;
           const success = msg.success !== false;
-          navStack = navStack.filter(l => l.level !== 'progress');
-          showToast(success ? '✅ Model załadowany!' : '❌ ' + (msg.error || 'Błąd'), success ? '' : 'err');
-          if (success) popLevel();
-          else pushLevel({ level: 'result', data: { success: false, error: msg.error, action: 'warmup', output: msg.output || '' } });
+          showToast(success ? '✅ Model załadowany — gotowy do pracy!' : '❌ ' + (msg.error || 'Błąd'), success ? '' : 'err');
           return;
-        }
-        if (msg.data) {
-          running.output = (running.output || '') + msg.data;
-          if (currentLevel().level === 'progress') renderProgressLive(running.output);
         }
       } catch {}
     };
@@ -1966,10 +2165,6 @@
       es.close();
       showToast('Połączenie przerwane', 'err');
       el.classList.remove('running');
-      if (running && running._progressTimer) clearInterval(running._progressTimer);
-      running = null;
-      navStack = navStack.filter(l => l.level !== 'progress');
-      render();
     };
   }
 
@@ -2074,13 +2269,28 @@
             if (msg.done) {
               es.close(); el.classList.remove('running');
               if (running && running._progressTimer) clearInterval(running._progressTimer);
+              if (running && running._escHandler) document.removeEventListener('keydown', running._escHandler);
               addJobToQueue(t.label, msg.error ? 'error' : 'done', msg.output);
               running = null;
               navStack = navStack.filter(l => l.level !== 'progress');
-              pushLevel({ level: 'result', data: { success: !msg.error, error: msg.error, action: t.action, output: msg.output || '' } });
+              const success = !msg.error;
+              var gr2 = window._genResult; window._genResult = null;
+              if (t.action === 'regenerate-index') {
+                showToast(success ? '✅ Indeks odświeżony pomyślnie' : '❌ Błąd odświeżania indeksu', success ? '' : 'err');
+              } else if (success) {
+                showToast('✅ Zadanie zakończone', '');
+              } else {
+                showToast('❌ ' + (msg.error || 'Błąd'), 'err');
+              }
+              pushLevel({ level: 'result', data: { success, error: msg.error, action: t.action, output: msg.output || '', genResult: gr2 || null } });
               return;
             }
-            if (msg.data) { running.output = (running.output || '') + msg.data; if (currentLevel().level === 'progress') renderProgressLive(running.output); }
+          if (msg.type === 'event' && msg.event) {
+            if (currentLevel().level === 'progress') renderProgressLive(msg.event);
+          } else if (msg.data) {
+            running.output = (running.output || '') + msg.data;
+            if (currentLevel().level === 'progress') renderProgressLive(running.output);
+          }
           } catch {}
         };
         es.onerror = () => { es.close(); showToast('Utracono połączenie z serwerem', 'err'); el.classList.remove('running'); if (running && running._progressTimer) clearInterval(running._progressTimer); running = null; navStack = navStack.filter(l => l.level !== 'progress'); render(); };
@@ -2151,17 +2361,25 @@
             es.close();
             el.classList.remove('running');
             if (running && running._progressTimer) clearInterval(running._progressTimer);
+            if (running && running._escHandler) document.removeEventListener('keydown', running._escHandler);
             addJobToQueue(running?.tileAction?.label || 'Zadanie', msg.error ? 'error' : 'done', msg.output);
             running = null;
             const out = msg.output || '';
-            const fileMatch = out.match(/(?:output[/\\])[^\s\n]+\.(?:md|json|html)/i) || out.match(/(?:do|:|→)\s*([^\s\n]+\.(?:md|json|html|txt))/i);
-            // Replace progress level with result
-            navStack = navStack.filter(l => l.level !== 'progress');
-            pushLevel({ level: 'result', data: { success: !msg.error, error: msg.error, action: t.action, output: out, file: fileMatch ? (fileMatch[1] || fileMatch[0]).trim() : null } });
+            var gr = window._genResult; window._genResult = null;
+            if (gr && gr.title) {
+              navStack = navStack.filter(l => l.level !== 'progress');
+              pushLevel({ level: 'result', data: { success: !msg.error, error: msg.error, action: t.action, genResult: gr, output: out } });
+            } else {
+              const fileMatch = out.match(/(?:output[/\\])[^\s\n]+\.(?:md|json|html)/i) || out.match(/(?:do|:|→)\s*([^\s\n]+\.(?:md|json|html|txt))/i);
+              navStack = navStack.filter(l => l.level !== 'progress');
+              pushLevel({ level: 'result', data: { success: !msg.error, error: msg.error, action: t.action, output: out, file: fileMatch ? (fileMatch[1] || fileMatch[0]).trim() : null } });
+            }
             return;
           }
           // Live update: accumulate output and re-render progress
-          if (msg.data) {
+          if (msg.type === 'event' && msg.event) {
+            if (currentLevel().level === 'progress') renderProgressLive(msg.event);
+          } else if (msg.data) {
             running.output = (running.output || '') + msg.data;
             if (currentLevel().level === 'progress') renderProgressLive(running.output);
           }
@@ -2308,8 +2526,8 @@
   let toastTimer;
   function showToast(msg, type) {
     toast.textContent = msg;
-    toast.style.borderColor = type === 'err' ? 'var(--red)' : 'var(--cyan)';
-    toast.style.color = type === 'err' ? 'var(--red)' : 'var(--cyan)';
+    toast.style.borderColor = type === 'err' ? 'var(--error)' : 'var(--green)';
+    toast.style.color = type === 'err' ? 'var(--error)' : 'var(--green)';
     toast.style.boxShadow = type === 'err' ? '0 0 15px rgba(239,68,68,.2)' : '';
     toast.classList.add('show');
     clearTimeout(toastTimer);

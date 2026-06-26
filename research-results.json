@@ -1,1 +1,16 @@
-﻿[]
+[
+  {
+    "id": "354725b99eb53fca",
+    "query": "Nowości na temat Rufus AI od AMAZON",
+    "date": "2026-06-26T12:33:20.200Z",
+    "output": "{\"error\": \"'charmap' codec can't encode character '\\\\u23f3' in position 0: character maps to <undefined>\", \"type\": \"UnicodeEncodeError\", \"action\": \"add-research\"}\r\n1",
+    "category": "ecommerce"
+  },
+  {
+    "id": "7f7c6c2c24b422d6",
+    "query": "Nowe sposoby na SEO z AI",
+    "date": "2026-06-25T18:20:39.558Z",
+    "output": "{\"error\": \"'charmap' codec can't encode character '\\\\u23f3' in position 0: character maps to <undefined>\", \"type\": \"UnicodeEncodeError\", \"action\": \"add-research\"}\r\n1",
+    "category": "ecommerce"
+  }
+]

@@ -3,7 +3,7 @@ import { execSync } from "child_process";
 import { createInterface } from "readline";
 import { setTimeout } from "timers/promises";
 import Parser from "rss-parser";
-import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed, NB_NEWS_ID, NB_SOURCES_ID } from "./lib/shared.mjs";
+import { C, esc, ts, stepReset, step, loadGen, markGen, ollamaModels, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed, NB_NEWS_ID, NB_SOURCES_ID, setJsonMode, isJsonMode, emitJSON } from "./lib/shared.mjs";
 import { postToLinkedIn } from "./social.mjs";
 
 function nbPush(url, title) {
@@ -59,9 +59,11 @@ async function main() {
   process.on("SIGINT", () => { console.log(`\n${C.ylw}⏹ Przerwano${C.rst}`); cleanup(); process.exit(0); });
   const start = Date.now();
   const useOpenRouter = !!process.env.OPENROUTER_KEY;
+  const jsonMode = process.argv.includes("--json-output");
+  if (jsonMode) setJsonMode(true);
 
   // --- parse flags ---
-  const raw = process.argv.slice(2);
+  const raw = process.argv.slice(2).filter(a => a !== "--json-output");
   const flagPush = raw.includes("--push");
   const flagNonInteractive = raw.includes("--non-interactive");
   const flagVerb = raw.includes("--verbose") || raw.includes("-v");
@@ -90,36 +92,40 @@ async function main() {
   const toneShort = TONES[optTone].label;
   const langShort = LANGS[optLang].label;
 
-  console.log("╔══════════════════════════════════════════╗");
-  console.log(`║     Generator v3${rssUrl ? " RSS" : ""} · ${fmtShort} · ${personaShort} · ${toneShort} · ${langShort}  ║`);
-  console.log(`║     Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"}                         ║`);
-  console.log("╚══════════════════════════════════════════╝\n");
+  if (!jsonMode) {
+    console.log("╔══════════════════════════════════════════╗");
+    console.log(`║     Generator v3${rssUrl ? " RSS" : ""} · ${fmtShort} · ${personaShort} · ${toneShort} · ${langShort}  ║`);
+    console.log(`║     Provider: ${useOpenRouter ? "OpenRouter" : "Ollama"}                         ║`);
+    console.log("╚══════════════════════════════════════════╝\n");
+  }
 
   let topic, userContent, systemPrompt, rssSourceLink, rssSourceLabel;
 
   // [1] Topic / RSS
-  step(rssUrl ? "Pobieranie RSS" : "Pobieranie tematu");
+  step(rssUrl ? "Pobieranie RSS" : "Pobieranie tematu", C.cyn, "rss_fetch");
 
   if (rssUrl) {
     const parser = new Parser({ timeout: 30000, headers: { 'User-Agent': 'SmartBuyers/3.0' } });
     let parsed;
     try {
       parsed = await parser.parseURL(rssUrl);
-      console.log(`  → ${parsed.title || rssUrl}: ${parsed.items.length} wpisów`);
-    } catch (e) { console.log(`  ${C.red}→ RSS failed: ${e.message}${C.rst}`); cleanup(); process.exit(1); }
+      if (!jsonMode) console.log(`  → ${parsed.title || rssUrl}: ${parsed.items.length} wpisów`);
+    } catch (e) { if (!jsonMode) console.log(`  ${C.red}→ RSS failed: ${e.message}${C.rst}`); cleanup(); process.exit(1); }
 
     const gen = loadGen();
     const available = parsed.items.filter(it => { const l = it.link || it.guid || it.title; return l && !gen[l]; });
-    console.log(`  → Niegenerowane: ${available.length} / ${parsed.items.length}`);
-    if (available.length === 0) { console.log(`  ${C.dim}→ Wszystkie już wygenerowane${C.rst}`); cleanup(); process.exit(0); }
+    if (!jsonMode) console.log(`  → Niegenerowane: ${available.length} / ${parsed.items.length}`);
+    if (available.length === 0) { if (!jsonMode) console.log(`  ${C.dim}→ Wszystkie już wygenerowane${C.rst}`); cleanup(); process.exit(0); }
 
     if (flagNonInteractive) {
       const chosen = available[0];
       const cTitle = chosen.title || "Bez tytułu";
       const cSnippet = (chosen.contentSnippet || chosen.content || "").slice(0, 5000);
       const cLink = chosen.link;
-      console.log(`\n  → Auto-pick #1: "${cTitle.slice(0, 80)}"`);
-      console.log(`  → Dostępnych: ${available.length} / ${parsed.items.length}`);
+      if (!jsonMode) {
+        console.log(`\n  → Auto-pick #1: "${cTitle.slice(0, 80)}"`);
+        console.log(`  → Dostępnych: ${available.length} / ${parsed.items.length}`);
+      }
 
       topic = cTitle;
       const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, rssTitle: cTitle, rssSnippet: cSnippet });
@@ -128,22 +134,26 @@ async function main() {
       rssSourceLink = cLink;
       rssSourceLabel = cTitle;
     } else {
-      console.log("\n  Wybierz newsa:");
-      available.forEach((it, i) => {
-        const d = it.pubDate || it.isoDate || "";
-        const s = (it.contentSnippet || it.content || "").slice(0, 80).replace(/\n/g, " ");
-        console.log(`    ${C.grn}${i + 1}.${C.rst} ${(it.title || "?").slice(0, 90)}`);
-        if (d) console.log(`       ${C.dim}${d.slice(0, 30)}${C.rst}`);
-        if (s) console.log(`       ${C.dim}"${s}..."${C.rst}`);
-      });
+      if (!jsonMode) {
+        console.log("\n  Wybierz newsa:");
+        available.forEach((it, i) => {
+          const d = it.pubDate || it.isoDate || "";
+          const s = (it.contentSnippet || it.content || "").slice(0, 80).replace(/\n/g, " ");
+          console.log(`    ${C.grn}${i + 1}.${C.rst} ${(it.title || "?").slice(0, 90)}`);
+          if (d) console.log(`       ${C.dim}${d.slice(0, 30)}${C.rst}`);
+          if (s) console.log(`       ${C.dim}"${s}..."${C.rst}`);
+        });
+      }
 
       const pick = parseInt(await ask(`\n  Wybierz (1-${available.length}, Enter=1): `), 10);
       const chosen = available[pick - 1] || available[0];
       const cTitle = chosen.title || "Bez tytułu";
       const cSnippet = (chosen.contentSnippet || chosen.content || "").slice(0, 5000);
       const cLink = chosen.link;
-      console.log(`\n  → "${cTitle.slice(0, 80)}"`);
-      console.log(`  → Treść: ${cSnippet.length} znaków | Link: ${cLink || "brak"}`);
+      if (!jsonMode) {
+        console.log(`\n  → "${cTitle.slice(0, 80)}"`);
+        console.log(`  → Treść: ${cSnippet.length} znaków | Link: ${cLink || "brak"}`);
+      }
 
       topic = cTitle;
       const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, rssTitle: cTitle, rssSnippet: cSnippet });
@@ -155,124 +165,169 @@ async function main() {
   } else {
     topic = (positional[0] || "").trim();
     if (!topic) topic = (await ask("  Temat artykułu: ")).trim();
-    if (!topic) { topic = "Czym jest dropshipping B2B"; console.log(`  → Domyślny: "${topic}"`); }
-    else console.log(`  → "${topic}" (${topic.length} znaków)`);
+    if (!topic) { topic = "Czym jest dropshipping B2B"; if (!jsonMode) console.log(`  → Domyślny: "${topic}"`); }
+    else if (!jsonMode) console.log(`  → "${topic}" (${topic.length} znaków)`);
     const bp = buildPrompt({ format: optFormat, persona: optPersona, tone: optTone, lang: optLang, topic });
     userContent = bp.user;
     systemPrompt = bp.system;
   }
 
   // [2] Model
-  step("Wybór modelu AI");
+  step("Wybór modelu AI", C.cyn, "model_select");
   let model = (positional[1] || "").trim();
   if (!useOpenRouter) {
     const models = ollamaModels();
-    if (models.length === 0) { console.log(`  ${C.red}→ Brak modeli – uruchom Ollamę${C.rst}`); cleanup(); process.exit(1); }
+    if (models.length === 0) { if (!jsonMode) console.log(`  ${C.red}→ Brak modeli – uruchom Ollamę${C.rst}`); cleanup(); process.exit(1); }
     if (!model) {
       if (flagNonInteractive) {
         model = models[0];
-        console.log(`  → ${models.length} modele, auto: ${model}`);
+        if (!jsonMode) console.log(`  → ${models.length} modele, auto: ${model}`);
       } else {
-        console.log("  Dostępne modele:");
-        models.forEach((m, i) => console.log(`    ${i + 1}. ${m}`));
+        if (!jsonMode) {
+          console.log("  Dostępne modele:");
+          models.forEach((m, i) => console.log(`    ${i + 1}. ${m}`));
+        }
         const p = parseInt(await ask(`  Wybierz (1-${models.length}, Enter=domyślny): `), 10);
         model = models[p - 1] || models[0];
       }
-    } else if (!models.includes(model)) { console.log(`  ${C.ylw}→ "${model}" nie znaleziony – używam ${models[0]}${C.rst}`); model = models[0]; }
+    } else if (!models.includes(model)) { if (!jsonMode) console.log(`  ${C.ylw}→ "${model}" nie znaleziony – używam ${models[0]}${C.rst}`); model = models[0]; }
   } else { if (!model) model = "qwen/qwen-2.5-7b-instruct"; }
-  console.log(`  → ${model}`);
+  if (!jsonMode) console.log(`  → ${model}`);
+  if (jsonMode) emitJSON("meta", { format: optFormat, persona: optPersona, tone: optTone, lang: optLang, model, provider: useOpenRouter ? "openrouter" : "ollama" });
 
   // [3] Dir
-  step("Katalog wyjściowy");
-  if (!existsSync("articles")) { mkdirSync("articles"); console.log("  → Utworzono articles/"); }
-  else console.log("  → articles/ istnieje");
+  step("Katalog wyjściowy", C.cyn, "dir_check");
+  if (!existsSync("articles")) { mkdirSync("articles"); if (!jsonMode) console.log("  → Utworzono articles/"); }
+  else if (!jsonMode) console.log("  → articles/ istnieje");
 
   // [4] Prompt
-  step("Prompt");
-  console.log(`  → System: ${systemPrompt.length} znaków`);
-  console.log(`  → User:   ${userContent.length} znaków`);
-  if (flagVerb) { console.log(`\n  ${C.dim}──${systemPrompt.slice(0,150)}...──${C.rst}`); console.log(`\n  ${C.dim}──${userContent.slice(0,150)}...──${C.rst}`); }
+  step("Prompt", C.cyn, "prompt_build");
+  if (!jsonMode) {
+    console.log(`  → System: ${systemPrompt.length} znaków`);
+    console.log(`  → User:   ${userContent.length} znaków`);
+    if (flagVerb) { console.log(`\n  ${C.dim}──${systemPrompt.slice(0,150)}...──${C.rst}`); console.log(`\n  ${C.dim}──${userContent.slice(0,150)}...──${C.rst}`); }
+  }
 
   // [5] Warmup
   if (!useOpenRouter) {
-    step("Warmup modelu (pierwsze uruchomienie — ładuję do RAM)", C.ylw);
-    console.log(`  ${C.dim}→ Model ${model} może ładować się 60-120s przy pierwszym użyciu${C.rst}`);
+    step("Warmup modelu (pierwsze uruchomienie — ładuję do RAM)", C.ylw, "warmup");
+    if (!jsonMode) console.log(`  ${C.dim}→ Model ${model} może ładować się 60-120s przy pierwszym użyciu${C.rst}`);
     const tw = Date.now();
-    // Progress dots during warmup (model may take long to load into RAM)
     let warmupDone = false;
-    const dotTimer = setInterval(() => { if (!warmupDone) console.log(`  ${C.dim}⌛ wciąż ładuję model... (${((Date.now()-tw)/1000).toFixed(0)}s)${C.rst}`); }, 5000);
+    const dotTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - tw) / 1000);
+      if (!warmupDone) {
+        if (jsonMode) emitJSON("warmup_tick", { elapsed });
+        else console.log(`  ${C.dim}⌛ wciąż ładuję model... (${elapsed}s)${C.rst}`);
+      }
+    }, 5000);
     try {
       const wup = await fetch("http://localhost:11434/v1/chat/completions", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model, messages: [{ role: "user", content: "OK" }], max_tokens: 1, think: false }),
       });
       clearInterval(dotTimer); warmupDone = true;
-      if (!wup.ok) { console.log(`  ${C.red}→ ${wup.status}${C.rst}`); cleanup(); process.exit(1); }
+      if (!wup.ok) { if (!jsonMode) console.log(`  ${C.red}→ ${wup.status}${C.rst}`); cleanup(); process.exit(1); }
       const wj = await wup.json();
-      console.log(`  ${C.grn}→ Gotowe! ${wj.model||model} | ${((Date.now()-tw)/1000).toFixed(1)}s | ${wj.usage?.total_tokens||"?"} tokenów${C.rst}`);
-    } catch (e) { clearInterval(dotTimer); console.log(`  ${C.red}→ ${e.cause?.message||e.message}${C.rst}`); cleanup(); process.exit(1); }
+      const wElapsed = ((Date.now() - tw) / 1000).toFixed(1);
+      if (jsonMode) emitJSON("warmup_done", { elapsed: parseFloat(wElapsed), model: wj.model || model });
+      else console.log(`  ${C.grn}→ Gotowe! ${wj.model || model} | ${wElapsed}s | ${wj.usage?.total_tokens || "?"} tokenów${C.rst}`);
+    } catch (e) { clearInterval(dotTimer); if (!jsonMode) console.log(`  ${C.red}→ ${e.cause?.message || e.message}${C.rst}`); cleanup(); process.exit(1); }
   }
 
   // [6] Generate
-  step("Generowanie artykułu (streaming tokenów)", C.ylw);
+  step("Generowanie artykułu (streaming tokenów)", C.ylw, "generating");
   const genStart = Date.now();
   let completed = false;
-  const statusLoop = setInterval(() => { if (!completed) console.log(`  ${C.dim}[⌛ ${((Date.now()-genStart)/1000).toFixed(0)}s] AI pisze artykuł...${C.rst}`); }, 10000);
+  const statusLoop = setInterval(() => {
+    if (!completed) {
+      const elapsed = Math.floor((Date.now() - genStart) / 1000);
+      if (!jsonMode) console.log(`  ${C.dim}[⌛ ${elapsed}s] AI pisze artykuł...${C.rst}`);
+    }
+  }, 10000);
   let result;
   try { result = await generate(model, systemPrompt, userContent, LANGS[optLang].minWords); }
-  catch (e) { completed = true; clearInterval(statusLoop); console.log(`  ${C.red}→ ${e.message}${C.rst}`); cleanup(); process.exit(1); }
+  catch (e) { completed = true; clearInterval(statusLoop); if (!jsonMode) console.log(`  ${C.red}→ ${e.message}${C.rst}`); if (jsonMode) emitJSON("error", { msg: e.message }); cleanup(); process.exit(1); }
   completed = true; clearInterval(statusLoop);
 
-  if (!result.data) { console.log(`  ${C.red}→ Nie udało się${C.rst}`); cleanup(); process.exit(1); }
-  if (result.issues?.length) console.log(`  ${C.ylw}→ Uwagi: ${result.issues.join(", ")}${C.rst}`);
+  if (!result.data) { if (!jsonMode) console.log(`  ${C.red}→ Nie udało się${C.rst}`); if (jsonMode) emitJSON("error", { msg: "Nie udało się wygenerować" }); cleanup(); process.exit(1); }
+  if (result.issues?.length && !jsonMode) console.log(`  ${C.ylw}→ Uwagi: ${result.issues.join(", ")}${C.rst}`);
+  if (!jsonMode) {
+    console.log(`  → title: "${(result.data.title||"").slice(0, 60)}" | body: ${(result.data.body||"").length} znaków`);
+    const v = validate(result.data, result.raw, LANGS[optLang].minWords);
+    console.log(`  → Słowa: ${v.words} | H2: ${v.hasH2?"✅":"❌"} | Czyt: ${v.readability} | Desc: ${(result.data.desc||"").length} znaków`);
+  }
 
   // [7] Build HTML
-  step("Generowanie dokumentu HTML");
+  step("Generowanie dokumentu HTML", C.cyn, "build_html");
   const extra = rssSourceLink ? { sourceLink: rssSourceLink, sourceLabel: rssSourceLabel, format: optFormat } : { format: optFormat };
   const { html, fname, body, slug, artTitle, pageUrl } = buildHtml(result.data, result.raw, topic, model, extra);
-  console.log(`  → ${artTitle.slice(0, 60)} | ${slug}`);
-  console.log(`  → Body: ${body.length} zn | HTML: ${html.length} zn (~${Math.ceil(html.length/1024)} KB)`);
+  if (!jsonMode) {
+    console.log(`  → ${artTitle.slice(0, 60)} | ${slug}`);
+    console.log(`  → Body: ${body.length} zn | HTML: ${html.length} zn (~${Math.ceil(html.length/1024)} KB)`);
+  }
 
   // [8] Save
-  step("Zapis pliku");
+  step("Zapis pliku", C.cyn, "save_file");
   writeFileSync(fname, html, "utf8");
-  console.log(`  → ${C.grn}${fname}${C.rst} (${(html.length/1024).toFixed(1)} KB)`);
+  if (!jsonMode) console.log(`  → ${C.grn}${fname}${C.rst} (${(html.length/1024).toFixed(1)} KB)`);
 
   // [9] generated.json
   if (rssSourceLink) {
-    step("generated.json");
+    step("generated.json", C.cyn, "mark_gen");
     markGen(rssSourceLink, slug, result.data?.title || result.data?.topic);
-    console.log(`  → ${rssSourceLink.slice(0, 60)} → ${slug}`);
+    if (!jsonMode) console.log(`  → ${rssSourceLink.slice(0, 60)} → ${slug}`);
   }
 
   // regenerate index + sitemap
-  step("Index + Sitemap", C.ylw);
+  step("Index + Sitemap", C.ylw, "reindex");
   const idxCount = generateIndex();
   generateSitemap();
   generateFeed();
-  console.log(`  → articles/index.html (${idxCount} artykułów) | feed.xml | sitemap.xml`);
+  if (!jsonMode) console.log(`  → articles/index.html (${idxCount} artykułów) | feed.xml | sitemap.xml`);
 
   // [10] NB sync
   if (nb) {
-    step("NotebookLM", C.ylw);
+    step("NotebookLM", C.ylw, "nb_sync");
     nbPush(pageUrl, artTitle);
   }
 
   // [11] Push (optional)
   if (flagPush) {
-    step("Git push", C.ylw);
+    step("Git push", C.ylw, "publish");
     const files = rssSourceLink ? "articles/ generated.json" : "articles/";
-    if (gitPush(files, `Add: ${artTitle.slice(0, 60)}`)) {
-      googleIndexingPing(pageUrl);
-      postToLinkedIn(artTitle, body.slice(0, 300), pageUrl);
-    }
+    gitPush(files, `Add: ${artTitle.slice(0, 60)}`);
+    googleIndexingPing(pageUrl);
+    postToLinkedIn(artTitle, body.slice(0, 300), pageUrl);
   }
 
+  // Final validation for JSON mode
+  const finalV = validate(result.data, result.raw, LANGS[optLang].minWords);
+
   // Done
-  step("Podsumowanie", C.grn);
+  step("Podsumowanie", C.grn, "done");
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  console.log(`  → ${elapsed}s | Model: ${model} | Body: ${body.length} zn`);
-  console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}\n`);
+  if (jsonMode) {
+    // Emit structured done event with full metadata
+    const wordCount = (body || "").replace(/<[^>]*>/g, "").split(/\s+/).filter(Boolean).length;
+    const readMin = Math.max(1, Math.ceil(wordCount / 200));
+    emitJSON("done", {
+      ok: true,
+      title: artTitle,
+      slug,
+      words: wordCount,
+      h2count: (body || "").match(/<h2[^>]*>/gi)?.length || 0,
+      readability: finalV.readability,
+      time: parseFloat(elapsed),
+      file: fname,
+      url: pageUrl,
+      model,
+      sizeKB: (html.length / 1024).toFixed(1),
+    });
+  } else {
+    console.log(`  → ${elapsed}s | Model: ${model} | Body: ${body.length} zn`);
+    console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/${fname.replace(/\\/g, "/")}${C.rst}\n`);
+  }
   cleanup();
 }
 main();

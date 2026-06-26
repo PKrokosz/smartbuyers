@@ -178,13 +178,25 @@ function spawnRun(run) {
 
   if (!script) { run.done = { done: true, success: false, error: "unknown action" }; return; }
 
+  args.push("--json-output");
   const child = spawn(process.execPath, [script, ...args], { cwd: ROOT });
   run.proc = child;
 
   run.buf = "";
   function emit(type, data) {
     run.buf += data;
-    if (run.res) sendSSE(run.res, { type, data, full: run.buf });
+    if (run.res) {
+      // Try to parse as JSON event from child process
+      try {
+        const evt = JSON.parse(data.trim());
+        if (evt && typeof evt === 'object' && evt.type) {
+          sendSSE(run.res, { type: "event", event: evt });
+          return;
+        }
+      } catch {}
+      // Fallback: raw text
+      sendSSE(run.res, { type, data, full: run.buf });
+    }
   }
   child.stdout.on("data", d => emit("stdout", d.toString()));
   child.stderr.on("data", d => emit("stderr", d.toString()));
@@ -235,6 +247,7 @@ function spawnQueueItem(run, s, body, baseArgs) {
   if (to && to !== "casual") sArgs.push("--tone", to);
   if (lng && lng !== "pl") sArgs.push("--lang", lng);
   if (body.push !== false) sArgs.push("--push");
+  sArgs.push("--json-output");
 
   const child = spawn(process.execPath, ["generate.mjs", ...sArgs], { cwd: ROOT });
   child.stdout.on("data", d => {
@@ -832,14 +845,14 @@ const server = createServer((req, res) => {
     const timer = setInterval(() => {
       sendSSE(res, { type: "step", step: "warmup_progress", data: `⌛ ładuję... (${Math.floor((Date.now()-start)/1000)}s)\n` });
     }, 5000);
-    const body = JSON.stringify({ model, messages: [{ role: "user", content: "OK" }], max_tokens: 1, stream: false });
-    const hreq = request({ hostname: "localhost", port: 11434, path: "/api/chat", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }, timeout: 300000 }, hres => {
+    const body = JSON.stringify({ model, messages: [{ role: "user", content: "OK" }], max_tokens: 1, stream: false, think: false });
+    const hreq = request({ hostname: "localhost", port: 11434, path: "/v1/chat/completions", method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }, timeout: 300000 }, hres => {
       let data = "";
       hres.on("data", c => data += c);
       hres.on("end", () => {
         clearInterval(timer);
         const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-        try { const j = JSON.parse(data); sendSSE(res, { done: true, success: true, step: "warmup_done", data: `✅ Gotowe! ${elapsed}s | ${j.model || model}\n`, output: `✅ Model ${model} załadowany w ${elapsed}s` }); }
+        try { const j = JSON.parse(data); const mdl = j.model || (j.choices?.[0]?.model) || model; sendSSE(res, { done: true, success: true, step: "warmup_done", data: `✅ Gotowe! ${elapsed}s | ${mdl}\n`, output: `✅ Model ${model} załadowany w ${elapsed}s` }); }
         catch { sendSSE(res, { done: true, success: true, step: "warmup_done", data: `✅ Gotowe! ${elapsed}s\n`, output: `✅ Model załadowany w ${elapsed}s` }); }
       });
     });
@@ -851,7 +864,7 @@ const server = createServer((req, res) => {
     return;
   }
 
-  // GET /api/articles — list all generated articles
+  // GET /api/articles — list all generated articles with content snippets
   if (m === "GET" && p === "/api/articles") {
     try {
       const gen = readJSON(path.join(ROOT, "generated.json")) || {};
@@ -862,9 +875,21 @@ const server = createServer((req, res) => {
         if (!slug || seen.has(slug)) continue;
         seen.add(slug);
         const filePath = `articles/${slug}.html`;
+        let snippet = "";
+        try {
+          const html = readFileSync(path.join(ROOT, filePath), "utf8");
+          const text = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&[a-z]+;/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          snippet = text.substring(0, 280);
+        } catch {}
         articles.push({
           slug: slug,
-          title: slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          title: v.title || slug.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
           date: v.date || "",
           source: v.source || "",
           sourceUrl: k || "",
@@ -875,6 +900,7 @@ const server = createServer((req, res) => {
           words: v.words || 0,
           size: v.size || "",
           file: filePath,
+          snippet,
         });
       }
       articles.sort((a, b) => (b.date || "").localeCompare(a.date || ""));

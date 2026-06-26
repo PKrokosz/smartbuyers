@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
 import { execSync } from "child_process";
 import Parser from "rss-parser";
-import { C, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed, NB_SOURCES_ID, NB_NEWS_ID } from "./lib/shared.mjs";
+import { C, ts, stepReset, step, log, loadGen, isGen, markGen, ollamaPs, parseFlag, FORMATS, PERSONAS, TONES, LANGS, buildPrompt, DEF_FORMAT, DEF_PERSONA, DEF_TONE, DEF_LANG, validate, streamResponse, buildHtml, gitPush, googleIndexingPing, generateIndex, generateSitemap, generateFeed, NB_SOURCES_ID, NB_NEWS_ID, setJsonMode, isJsonMode, emitJSON } from "./lib/shared.mjs";
 import { postToLinkedIn } from "./social.mjs";
 import { generateNewsletter } from "./newsletter.mjs";
 
@@ -79,12 +79,14 @@ async function generateDigest(items) {
 function saveArticle(gen, title, link) {
   const extra = link ? { sourceLink: link, sourceLabel: title, format: optFormat } : { format: optFormat };
   const { html, fname, body, slug, artTitle, pageUrl } = buildHtml(gen.data, gen.raw, title, MODEL, extra);
-  console.log(`  → ${slug} | ${body.length} zn`);
+  if (!isJsonMode()) console.log(`  → ${slug} | ${body.length} zn`);
   if (!existsSync("articles")) mkdirSync("articles");
   writeFileSync(fname, html, "utf8");
   if (link) markGen(link, slug, title);
-  console.log(`  ${C.grn}→ ${fname}${C.rst}`);
-  console.log(`  ${C.cyn}→ ${pageUrl}${C.rst}`);
+  if (!isJsonMode()) {
+    console.log(`  ${C.grn}→ ${fname}${C.rst}`);
+    console.log(`  ${C.cyn}→ ${pageUrl}${C.rst}`);
+  }
   return { slug, fname, pageUrl };
 }
 
@@ -118,14 +120,20 @@ async function warmup() {
 // --- main ---
 async function main() {
   const start = Date.now();
-  console.log("╔══════════════════════════════════════════╗");
-  console.log(`║     RSS → AI → Blog v3${flagDigest ? " DIGEST" : ""}                  ║`);
-  console.log("╚══════════════════════════════════════════╝");
-  console.log(`  Tryb: ${verb ? "verbose" : "normalny"}${flagReview ? " + review" : " (auto)"}${flagDigest ? " + digest" : ""}`);
-  console.log(`  Model: ${MODEL} | Format: ${FORMATS[optFormat].label} | ${LANGS[optLang].label}`);
-  console.log(`  Ollama: ${ollamaPs() || "brak"}\n`);
+  const jsonMode = process.argv.includes("--json-output");
+  if (jsonMode) setJsonMode(true);
 
-  stepReset(99); step("Wczytywanie feedów");
+  if (!jsonMode) {
+    console.log("╔══════════════════════════════════════════╗");
+    console.log(`║     RSS → AI → Blog v3${flagDigest ? " DIGEST" : ""}                  ║`);
+    console.log("╚══════════════════════════════════════════╝");
+    console.log(`  Tryb: ${verb ? "verbose" : "normalny"}${flagReview ? " + review" : " (auto)"}${flagDigest ? " + digest" : ""}`);
+    console.log(`  Model: ${MODEL} | Format: ${FORMATS[optFormat].label} | ${LANGS[optLang].label}`);
+    console.log(`  Ollama: ${ollamaPs() || "brak"}\n`);
+  }
+  if (jsonMode) emitJSON("meta", { format: optFormat, persona: optPersona, tone: optTone, lang: optLang, model: MODEL, provider: "ollama", mode: flagDigest ? "digest" : "watch", feeds: null });
+
+  stepReset(99); step("Wczytywanie feedów", C.cyn, "rss_fetch");
   if (!existsSync(FEEDS_FILE)) { log("ERR", `Brak ${FEEDS_FILE}`, C.red); process.exit(1); }
   const feeds = JSON.parse(readFileSync(FEEDS_FILE, "utf8"));
 
@@ -144,14 +152,17 @@ async function main() {
       const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}${langSuffix}`;
       feeds.push({ name: `Google News: ${q}`, url, filter: q.toLowerCase().split(/\s+/), lastGuid, _query: q });
     }
-    console.log(`  ${C.dim}→ +${selected.length} dynamicznych feed(ów) z zapytań${C.rst}`);
+    if (!jsonMode) console.log(`  ${C.dim}→ +${selected.length} dynamicznych feed(ów) z zapytań${C.rst}`);
   }
 
   log("INFO", `${feeds.length} feed(ów)`);
-  feeds.forEach((f, i) => {
-    const kw = f.filter ? ` [filtr: ${f.filter.some(f=>typeof f!=='string') ? '(dynamic)' : f.filter.slice(0,3).join(",")}]` : "";
-    console.log(`  ${i + 1}. ${f.name || f.url}${kw} | lastGuid: ${f.lastGuid ? f.lastGuid.slice(0, 30) + "..." : "BRAK"}`);
-  });
+  if (!jsonMode) {
+    feeds.forEach((f, i) => {
+      const kw = f.filter ? ` [filtr: ${f.filter.some(f=>typeof f!=='string') ? '(dynamic)' : f.filter.slice(0,3).join(",")}]` : "";
+      console.log(`  ${i + 1}. ${f.name || f.url}${kw} | lastGuid: ${f.lastGuid ? f.lastGuid.slice(0, 30) + "..." : "BRAK"}`);
+    });
+  }
+  if (jsonMode) emitJSON("info", { tag: "feeds", msg: `${feeds.length} feedów` });
 
   const parser = new Parser({ timeout: 30000, headers: { 'User-Agent': 'SmartBuyers/3.0' } });
   let totalGenerated = 0;
@@ -159,11 +170,11 @@ async function main() {
   const digestItems = [];
 
   for (const [fi, feed] of feeds.entries()) {
-    step(`[Feed ${fi + 1}/${feeds.length}] ${feed.name || feed.url}`, C.ylw);
+    step(`[Feed ${fi + 1}/${feeds.length}] ${feed.name || feed.url}`, C.ylw, "feed_process");
 
     let parsed;
     try { parsed = await parser.parseURL(feed.url); } catch (e) { log("ERR", `${e.message}`, C.red); continue; }
-    console.log(`  → ${parsed.items.length} wpisów`);
+    if (!jsonMode) console.log(`  → ${parsed.items.length} wpisów`);
     if (!parsed.items.length) continue;
 
     const newest = parsed.items[0];
@@ -172,7 +183,7 @@ async function main() {
 
     if (!feed.lastGuid) {
       feed.lastGuid = newestGuid;
-      console.log(`  ${C.dim}→ Pierwsze uruchomienie – GUID zapamiętany${C.rst}`);
+      if (!jsonMode) console.log(`  ${C.dim}→ Pierwsze uruchomienie – GUID zapamiętany${C.rst}`);
       nbPushSource(feed.url, feed.name || "RSS Feed");
       continue;
     }
@@ -214,12 +225,14 @@ async function main() {
       }
 
       totalGenerated++;
-      console.log(`\n  ── NOWY #${ii + 1}: ${itemTitle.slice(0, 80)} ──`);
-      console.log(`  Treść: ${snippet.length} znaków | Link: ${itemLink || "brak"}`);
+      if (!jsonMode) {
+        console.log(`\n  ── NOWY #${ii + 1}: ${itemTitle.slice(0, 80)} ──`);
+        console.log(`  Treść: ${snippet.length} znaków | Link: ${itemLink || "brak"}`);
+      }
 
       if (flagReview) {
         if (flagNonInteractive) {
-          console.log(`  ${C.dim}[auto-generuj]${C.rst}`);
+          if (!jsonMode) console.log(`  ${C.dim}[auto-generuj]${C.rst}`);
         } else {
           const ans = await new Promise(r => {
             const rl2 = createInterface({ input: process.stdin, output: process.stdout });
@@ -230,14 +243,14 @@ async function main() {
         }
       }
 
-      if (feedGenerated === 1 && !(await warmup())) { console.log(`  ${C.red}Ollama offline${C.rst}`); break; }
+      if (feedGenerated === 1 && !(await warmup())) { if (!jsonMode) console.log(`  ${C.red}Ollama offline${C.rst}`); break; }
 
-      console.log(`  ${C.dim}── generowanie ──${C.rst}`);
+      if (!jsonMode) console.log(`  ${C.dim}── generowanie ──${C.rst}`);
       let gen;
       try { gen = await generate(itemTitle, snippet); }
       catch (e) { log("ERR", `${e.message}`, C.red); continue; }
-      if (!gen.data) { console.log(`  ${C.red}→ Nieudane${C.rst}`); continue; }
-      if (gen.issues?.length) console.log(`  ${C.ylw}→ ${gen.issues.join(", ")}${C.rst}`);
+      if (!gen.data) { if (!jsonMode) console.log(`  ${C.red}→ Nieudane${C.rst}`); continue; }
+      if (gen.issues?.length && !jsonMode) console.log(`  ${C.ylw}→ ${gen.issues.join(", ")}${C.rst}`);
 
       const sa = saveArticle(gen, itemTitle, itemLink);
       if (sa) {
@@ -247,7 +260,7 @@ async function main() {
       }
     }
 
-    if (newCount > 0) console.log(`  → Nowych: ${newCount}${feed.filter ? ` (filtr: ${feed.filter.join(", ")})` : ""}`);
+    if (newCount > 0 && !jsonMode) console.log(`  → Nowych: ${newCount}${feed.filter ? ` (filtr: ${feed.filter.join(", ")})` : ""}`);
     feed.lastGuid = newestGuid;
   }
 
@@ -256,9 +269,9 @@ async function main() {
     if (digestItems.length <= 1) {
       log("WARN", "Za mało wpisów do digestu — pomijam", C.ylw);
     } else {
-      step("Generowanie digestu", C.ylw);
-      console.log(`  → ${digestItems.length} wpisów zebranych`);
-      if (!(await warmup())) { console.log(`  ${C.red}Ollama offline${C.rst}`); }
+      step("Generowanie digestu", C.ylw, "generating");
+      if (!jsonMode) console.log(`  → ${digestItems.length} wpisów zebranych`);
+      if (!(await warmup())) { if (!jsonMode) console.log(`  ${C.red}Ollama offline${C.rst}`); }
       else {
         const dig = await generateDigest(digestItems);
         if (dig && dig.data) {
@@ -289,17 +302,22 @@ async function main() {
   generateIndex(); generateSitemap(); generateFeed();
 
   if (totalGenerated > 0 && flagPush) {
-    step("Git push", C.ylw);
+    step("Git push", C.ylw, "publish");
     if (gitPush("articles/ feeds.json generated.json", `Auto: ${totalGenerated} artykuł(i) z RSS`)) {
       if (lastPageUrl) { googleIndexingPing(lastPageUrl); postToLinkedIn("SmartBuyers — Nowy artykuł", "", lastPageUrl); }
     }
-    console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/articles/${C.rst}\n`);
+    if (!jsonMode) console.log(`\n${C.cyn}🔗 https://pkrokosz.github.io/smartbuyers/articles/${C.rst}\n`);
   } else if (totalGenerated > 0) {
     step("Brak nowych wpisów");
   }
 
   if (flagNewsletter) await generateNewsletter();
 
-  console.log(`\n${C.grn}[${ts()}] [DONE] ${((Date.now() - start) / 1000).toFixed(1)}s | ${feeds.length} feedów | ${totalGenerated} artykułów${C.rst}`);
+  const totalTime = ((Date.now() - start) / 1000).toFixed(1);
+  if (jsonMode) {
+    emitJSON("done", { ok: true, totalGenerated, feeds: feeds.length, time: parseFloat(totalTime) });
+  } else {
+    console.log(`\n${C.grn}[${ts()}] [DONE] ${totalTime}s | ${feeds.length} feedów | ${totalGenerated} artykułów${C.rst}`);
+  }
 }
 main();
